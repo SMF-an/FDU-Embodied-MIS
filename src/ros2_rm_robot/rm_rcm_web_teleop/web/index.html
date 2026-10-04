@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#101713">
+  <title>RCM 遥控器</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101713;
+      --panel: #19231e;
+      --panel2: #202d26;
+      --line: #33443a;
+      --text: #edf5ef;
+      --muted: #9baea1;
+      --green: #74d69a;
+      --green2: #b8f3cd;
+      --red: #f07777;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(ellipse at 50% -10%, #24382c, var(--bg) 58%);
+      color: var(--text);
+      font: 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+      display: grid;
+      place-items: center;
+      padding: 24px 16px calc(24px + env(safe-area-inset-bottom));
+    }
+    main { width: min(100%, 760px); }
+    header { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 18px; }
+    h1 { font-size: clamp(24px, 5vw, 34px); margin: 0; letter-spacing: .02em; }
+    .subtitle { color: var(--muted); margin: 4px 0 0; font-size: 14px; }
+    .status {
+      display: inline-flex; align-items: center; gap: 9px; white-space: nowrap;
+      padding: 9px 12px; border: 1px solid var(--line); border-radius: 999px;
+      background: #17211b; color: var(--muted); font-size: 13px;
+    }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: #829087; }
+    .status.ready { color: var(--green2); }
+    .status.ready .dot { background: var(--green); box-shadow: 0 0 12px #74d69a88; }
+    .status.busy { color: #ffd28a; }
+    .status.busy .dot { background: #f0b85c; }
+    .card { background: linear-gradient(145deg, #1b2720, #151e19); border: 1px solid var(--line); border-radius: 22px; padding: clamp(18px, 4vw, 30px); box-shadow: 0 24px 70px #0005; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: center; }
+    h2 { margin: 0 0 5px; font-size: 18px; }
+    .hint { color: var(--muted); font-size: 13px; margin: 0 0 17px; }
+    .pad-wrap { display: grid; justify-items: center; }
+    .pad {
+      width: min(64vw, 270px); aspect-ratio: 1; border-radius: 50%; position: relative;
+      border: 1px solid #597262; background:
+        linear-gradient(90deg, transparent 49.7%, #78928133 50%, transparent 50.3%),
+        linear-gradient(transparent 49.7%, #78928133 50%, transparent 50.3%),
+        radial-gradient(circle, #25362c, #17221b 68%);
+      box-shadow: inset 0 0 30px #0005, 0 10px 26px #0004;
+      touch-action: none; user-select: none; cursor: crosshair;
+    }
+    .pad::before, .pad::after { content: ""; position: absolute; border: 1px solid #78928127; border-radius: 50%; inset: 17%; pointer-events: none; }
+    .pad::after { inset: 34%; }
+    .knob {
+      width: 30%; aspect-ratio: 1; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+      border-radius: 50%; border: 2px solid #d3f7df; background: radial-gradient(circle at 35% 30%, #baf3ce, #49ad70 72%);
+      box-shadow: 0 5px 18px #0007, 0 0 24px #67cf8b55; pointer-events: none;
+    }
+    .pad-label { color: var(--muted); font-size: 12px; margin-top: 12px; }
+    .axis-labels { width: min(64vw, 270px); display: flex; justify-content: space-between; color: #82968a; font-size: 11px; margin-top: 6px; }
+    .buttons { display: grid; gap: 12px; }
+    button { border: 1px solid #51745d; color: var(--text); font: inherit; font-weight: 650; border-radius: 14px; cursor: pointer; touch-action: none; user-select: none; }
+    .move {
+      min-height: 75px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 14px 17px; background: linear-gradient(110deg, #274833, #1c3024); text-align: left;
+    }
+    .move:active, .move.held { background: #326244; transform: translateY(1px); }
+    .move small { display: block; color: #b3d4bd; font-weight: 450; margin-top: 3px; }
+    .chevron { color: var(--green2); font-size: 25px; }
+    .stop { background: #382326; border-color: #744348; color: #ffd8d8; padding: 12px 14px; }
+    .stop:active { background: #5a2d33; }
+    .readout { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; padding-top: 17px; border-top: 1px solid var(--line); }
+    .pill { border: 1px solid #324339; background: #141d17; color: #bfcec3; border-radius: 10px; padding: 7px 10px; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .message { min-height: 24px; margin: 14px 2px 0; color: var(--muted); font-size: 13px; }
+    .message.error { color: #ff9e9e; }
+    footer { color: #829187; font-size: 12px; margin: 14px 4px 0; }
+    @media (max-width: 620px) {
+      body { padding-inline: 12px; }
+      header { align-items: flex-start; }
+      .status { padding: 8px 9px; font-size: 11px; }
+      .grid { grid-template-columns: 1fr; gap: 26px; }
+      .buttons { grid-template-columns: 1fr 1fr; }
+      .stop { grid-column: 1 / -1; }
+      .move { min-height: 68px; padding: 11px; font-size: 14px; }
+      .move small { font-size: 11px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>RCM 遥控器</h1>
+        <p id="modeLabel" class="subtitle">RCM 遥控</p>
+      </div>
+      <div id="status" class="status"><span class="dot"></span><span id="statusText">连接中</span></div>
+    </header>
+    <section class="card">
+      <div class="grid">
+        <section>
+          <h2>器具旋转</h2>
+          <p class="hint">按住摇杆并偏转；每一步旋转少许，松开停止继续发送。</p>
+          <div class="pad-wrap">
+            <div id="pad" class="pad" aria-label="RCM 旋转摇杆"><div id="knob" class="knob"></div></div>
+            <div class="axis-labels"><span>左倾</span><span>右倾</span></div>
+            <div class="pad-label">上下推动控制前后倾转</div>
+          </div>
+        </section>
+        <section>
+          <h2>轴向插入 / 退出</h2>
+          <p class="hint">按住按钮，机械臂按小步连续移动；松开即停止后续步进。</p>
+          <div class="buttons">
+            <button id="advance" class="move" type="button"><span>向前插入<small>沿器具轴线</small></span><span class="chevron">＋</span></button>
+            <button id="retract" class="move" type="button"><span>向后退出<small>沿器具轴线</small></span><span class="chevron">－</span></button>
+            <button id="stop" class="stop" type="button">停止当前运动</button>
+          </div>
+        </section>
+      </div>
+      <div class="readout">
+        <span id="position" class="pill">尖端：等待状态</span>
+        <span id="depth" class="pill">距 RCM：--</span>
+        <span id="step" class="pill">步长：--</span>
+      </div>
+      <p id="message" class="message" role="status">等待 RCM 节点。</p>
+    </section>
+    <footer>每次只发送一个小步，等待当前轨迹完成后再发送下一步。停止按钮会请求 MoveIt 停止当前轨迹。</footer>
+  </main>
+  <script>
+    const pad = document.getElementById('pad');
+    const knob = document.getElementById('knob');
+    const statusBox = document.getElementById('status');
+    const statusText = document.getElementById('statusText');
+    const modeLabel = document.getElementById('modeLabel');
+    const message = document.getElementById('message');
+    const position = document.getElementById('position');
+    const depth = document.getElementById('depth');
+    const step = document.getElementById('step');
+
+    let state = null;
+    let joystick = { x: 0, y: 0, active: false };
+    let insertion = 0;
+    let waitingForMove = false;
+    let sawBusy = false;
+    let sentAt = 0;
+    let sending = false;
+
+    function showMessage(text, isError = false) {
+      message.textContent = text;
+      message.classList.toggle('error', isError);
+    }
+    function resetPad() {
+      joystick = { x: 0, y: 0, active: false };
+      knob.style.left = '50%';
+      knob.style.top = '50%';
+    }
+    function updatePad(event) {
+      const rect = pad.getBoundingClientRect();
+      const max = rect.width * 0.31;
+      const dx = event.clientX - (rect.left + rect.width / 2);
+      const dy = event.clientY - (rect.top + rect.height / 2);
+      const length = Math.hypot(dx, dy);
+      const scale = length > max ? max / length : 1;
+      const x = dx * scale;
+      const y = dy * scale;
+      knob.style.left = `calc(50% + ${x}px)`;
+      knob.style.top = `calc(50% + ${y}px)`;
+      joystick.x = Math.max(-1, Math.min(1, x / max));
+      joystick.y = Math.max(-1, Math.min(1, -y / max));
+      joystick.active = Math.hypot(joystick.x, joystick.y) > 0.16;
+    }
+    pad.addEventListener('pointerdown', event => {
+      pad.setPointerCapture(event.pointerId);
+      updatePad(event);
+    });
+    pad.addEventListener('pointermove', event => {
+      if (pad.hasPointerCapture(event.pointerId)) updatePad(event);
+    });
+    const releasePad = () => resetPad();
+    pad.addEventListener('pointerup', releasePad);
+    pad.addEventListener('pointercancel', releasePad);
+
+    function bindHold(buttonId, value) {
+      const button = document.getElementById(buttonId);
+      const start = event => {
+        event.preventDefault();
+        button.setPointerCapture(event.pointerId);
+        insertion = value;
+        button.classList.add('held');
+      };
+      const end = () => {
+        insertion = 0;
+        button.classList.remove('held');
+      };
+      button.addEventListener('pointerdown', start);
+      button.addEventListener('pointerup', end);
+      button.addEventListener('pointercancel', end);
+      button.addEventListener('lostpointercapture', end);
+    }
+    bindHold('advance', 1);
+    bindHold('retract', -1);
+
+    async function post(path, body = {}) {
+      const response = await fetch(path, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+      return result;
+    }
+
+    async function pump() {
+      if (sending || !state?.ready || state.busy || waitingForMove) return;
+      const active = joystick.active || insertion !== 0;
+      if (!active) return;
+      sending = true;
+      try {
+        await post('/api/jog', {
+          tilt_x: joystick.active ? joystick.x : 0,
+          tilt_y: joystick.active ? joystick.y : 0,
+          insertion
+        });
+        waitingForMove = true;
+        sawBusy = false;
+        sentAt = Date.now();
+        showMessage('已发送一步，等待机械臂完成…');
+      } catch (error) {
+        if (error.message.includes('moving')) waitingForMove = true;
+        showMessage(error.message, true);
+      } finally {
+        sending = false;
+      }
+    }
+
+    async function poll() {
+      try {
+        const response = await fetch('/api/state', { cache: 'no-store' });
+        state = await response.json();
+        const modeName = state.mode === 'real' ? '真机' : '仿真';
+        modeLabel.textContent = `RM65-6FB ${modeName}控制`;
+        statusBox.classList.toggle('ready', state.ready && !state.busy);
+        statusBox.classList.toggle('busy', Boolean(state.busy));
+        statusText.textContent = !state.ready ? `等待${modeName}` : state.busy ? '机械臂运动中' : `${modeName}已连接`;
+        if (state.ready) {
+          position.textContent = `尖端：${(state.tip.x * 1000).toFixed(1)}, ${(state.tip.y * 1000).toFixed(1)}, ${(state.tip.z * 1000).toFixed(1)} mm`;
+          depth.textContent = `距 RCM：${(state.tip_to_rcm_m * 1000).toFixed(1)} mm`;
+          step.textContent = `步长：${state.step_angle_deg}° / ${state.step_insertion_mm} mm`;
+        }
+        if (state.busy) sawBusy = true;
+        if (waitingForMove && sawBusy && !state.busy) {
+          waitingForMove = false;
+          showMessage('运动完成；可继续操作。');
+        } else if (waitingForMove && !sawBusy && Date.now() - sentAt > 2500 && !state.busy) {
+          waitingForMove = false;
+        }
+        if (!state.ready) showMessage(state.message || '等待 RCM 节点。');
+      } catch (_error) {
+        statusBox.classList.remove('ready', 'busy');
+        statusText.textContent = '服务未连接';
+        showMessage('无法连接遥控服务，请确认 ROS 节点正在运行。', true);
+      }
+      pump();
+    }
+    document.getElementById('stop').addEventListener('click', async () => {
+      resetPad();
+      insertion = 0;
+      waitingForMove = true;
+      try {
+        await post('/api/stop');
+        sawBusy = Boolean(state?.busy);
+        sentAt = Date.now();
+        showMessage('已请求停止当前 MoveIt 轨迹。');
+      } catch (error) {
+        waitingForMove = false;
+        showMessage(error.message, true);
+      }
+    });
+    setInterval(poll, 200);
+    poll();
+  </script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+rm_driver:
+  ros__parameters:
+    arm_ip: "192.168.1.19"
+    tcp_port: 8080
+    arm_type: "RM_65"
+    arm_dof: 6
+    tool_tcp_enable: true
+    tool_tcp_frame_name: "MIS_TOOL25"
+    tool_tcp_offset_z_m: 0.25
+    tool_payload_kg: 0.05
+    tool_com_z_m: 0.125
+    verify_movej: true
+    udp_ip: "192.168.1.101"
+    udp_cycle: 5
+    udp_port: 8089
+    udp_force_coordinate: 0
+    udp_hand: false
+    udp_plus_base: false
+    udp_plus_state: false
+    udp_joint_speed_state: true
+    udp_lift_state: false
+    udp_expand_state: false
+    udp_arm_current_status: false
+    udp_aloha_state: false
+    trajectory_mode: 0
+    radio: 0
+    arm_joints: ["right_joint1", "right_joint2", "right_joint3", "right_joint4", "right_joint5", "right_joint6"]

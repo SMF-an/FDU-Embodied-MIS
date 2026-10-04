@@ -6,4 +6,7 @@ install/
 # Model weights
 models/
 
+# Data files
+data/
+
 cmd.txt
