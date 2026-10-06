@@ -3,6 +3,7 @@ import yaml
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
+from launch.actions import TimerAction
 from launch_ros.actions import Node
 
 
@@ -23,11 +24,16 @@ def generate_launch_description():
             parameters=[load_parameters(left_config)],
             output="screen",
         ),
-        Node(
-            package="rm_driver",
-            executable="rm_driver",
-            namespace="right_arm",
-            parameters=[load_parameters(right_config)],
-            output="screen",
+        TimerAction(
+            period=3.0,
+            actions=[
+                Node(
+                    package="rm_driver",
+                    executable="rm_driver",
+                    namespace="right_arm",
+                    parameters=[load_parameters(right_config)],
+                    output="screen",
+                )
+            ],
         ),
     ])

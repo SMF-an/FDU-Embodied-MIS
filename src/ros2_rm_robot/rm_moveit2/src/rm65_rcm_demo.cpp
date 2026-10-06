@@ -95,8 +95,12 @@ public:
   bool init()
   {
     const std::string group = get_parameter("planning_group").as_string();
+    const moveit::planning_interface::MoveGroupInterface::Options move_group_options(
+      group,
+      moveit::planning_interface::MoveGroupInterface::ROBOT_DESCRIPTION,
+      get_namespace());
     move_group_ = std::make_shared<moveit::planning_interface::MoveGroupInterface>(
-      shared_from_this(), group);
+      shared_from_this(), move_group_options);
     move_group_->setMaxVelocityScalingFactor(get_parameter("velocity_scaling").as_double());
     move_group_->setMaxAccelerationScalingFactor(
       get_parameter("acceleration_scaling").as_double());

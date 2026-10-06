@@ -6,10 +6,14 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import cv2
 import rclpy
 from ament_index_python.packages import get_package_share_directory
+from cv_bridge import CvBridge
 from geometry_msgs.msg import PointStamped, PoseStamped
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
+from sensor_msgs.msg import Image
 from std_msgs.msg import Bool
 
 from .server import clamp, multiply_quaternions, normalize_quaternion, rotate_vector
@@ -24,10 +28,14 @@ class DualRcmWebTeleop(Node):
         self.declare_parameter("port", 8765)
         self.declare_parameter("step_angle_deg", 2.0)
         self.declare_parameter("step_insertion_m", 0.002)
+        self.declare_parameter("camera_topic", "/camera/camera/color/image_raw")
+        self.declare_parameter("camera_jpeg_quality", 78)
         self._host = self.get_parameter("host").value
         self._port = int(self.get_parameter("port").value)
         self._step_angle = math.radians(float(self.get_parameter("step_angle_deg").value))
         self._step_insertion = float(self.get_parameter("step_insertion_m").value)
+        self._camera_topic = self.get_parameter("camera_topic").value
+        self._camera_jpeg_quality = int(self.get_parameter("camera_jpeg_quality").value)
         self._mode = "simulation" if self.get_parameter("use_sim_time").value else "real"
         if not 1 <= self._port <= 65535:
             raise ValueError("port must be between 1 and 65535")
@@ -35,8 +43,18 @@ class DualRcmWebTeleop(Node):
             raise ValueError("step_angle_deg must be in (0, 10]")
         if not 0.0 < self._step_insertion <= 0.02:
             raise ValueError("step_insertion_m must be in (0, 0.02]")
+        if not 1 <= self._camera_jpeg_quality <= 100:
+            raise ValueError("camera_jpeg_quality must be between 1 and 100")
 
         self._lock = threading.Lock()
+        self._camera_condition = threading.Condition()
+        self._camera_bridge = CvBridge()
+        self._camera_jpeg = None
+        self._camera_sequence = 0
+        self._camera_received = 0.0
+        self._camera_width = 0
+        self._camera_height = 0
+        self._last_camera_encode = 0.0
         self._poses = {side: None for side in self.SIDES}
         self._pose_received = {side: 0.0 for side in self.SIDES}
         self._rcms = {side: None for side in self.SIDES}
@@ -47,6 +65,12 @@ class DualRcmWebTeleop(Node):
         self._active_saw_busy = False
         self._target_pubs = {}
         self._stop_pubs = {}
+        self._camera_sub = self.create_subscription(
+            Image,
+            self._camera_topic,
+            self._on_camera_image,
+            qos_profile_sensor_data,
+        )
 
         for side in self.SIDES:
             topic_root = f"/{side}_arm/rcm_demo"
@@ -97,6 +121,51 @@ class DualRcmWebTeleop(Node):
                     self._active_saw_busy = True
                 elif self._active_saw_busy:
                     self._clear_active()
+
+    def _on_camera_image(self, message):
+        now = time.monotonic()
+        if now - self._last_camera_encode < 1.0 / 15.0:
+            return
+        self._last_camera_encode = now
+        try:
+            image = self._camera_bridge.imgmsg_to_cv2(message, desired_encoding="bgr8")
+            success, encoded = cv2.imencode(
+                ".jpg",
+                image,
+                [cv2.IMWRITE_JPEG_QUALITY, self._camera_jpeg_quality],
+            )
+            if not success:
+                return
+        except Exception as error:
+            self.get_logger().warning(f"Cannot encode camera frame: {error}")
+            return
+
+        with self._camera_condition:
+            self._camera_jpeg = encoded.tobytes()
+            self._camera_sequence += 1
+            self._camera_received = now
+            self._camera_width = int(message.width)
+            self._camera_height = int(message.height)
+            self._camera_condition.notify_all()
+
+    def wait_camera_frame(self, after_sequence, timeout):
+        with self._camera_condition:
+            if self._camera_sequence <= after_sequence:
+                self._camera_condition.wait(timeout)
+            if self._camera_sequence <= after_sequence:
+                return after_sequence, None
+            return self._camera_sequence, self._camera_jpeg
+
+    def camera_state(self):
+        with self._camera_condition:
+            age = time.monotonic() - self._camera_received if self._camera_received else None
+            return {
+                "topic": self._camera_topic,
+                "available": age is not None and age < 2.0,
+                "age_sec": age,
+                "width": self._camera_width,
+                "height": self._camera_height,
+            }
 
     def _clear_active(self):
         self._active_arm = None
@@ -160,6 +229,7 @@ class DualRcmWebTeleop(Node):
                 "step_angle_deg": math.degrees(self._step_angle),
                 "step_insertion_mm": self._step_insertion * 1000.0,
                 "locked_by": self._active_arm,
+                "camera": self.camera_state(),
                 "arms": arms,
             }
 
@@ -282,8 +352,33 @@ def make_handler(node, page):
                 self._send(200, page, "text/html; charset=utf-8")
             elif self.path == "/api/state":
                 self._send(200, node.state())
+            elif self.path == "/camera.mjpg":
+                self._stream_camera()
             else:
                 self._send(404, {"error": "not found"})
+
+        def _stream_camera(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            sequence = 0
+            try:
+                while True:
+                    sequence, jpeg = node.wait_camera_frame(sequence, 2.0)
+                    if jpeg is None:
+                        continue
+                    self.wfile.write(
+                        b"--frame\r\n"
+                        b"Content-Type: image/jpeg\r\n"
+                        + f"Content-Length: {len(jpeg)}\r\n\r\n".encode("ascii")
+                        + jpeg
+                        + b"\r\n"
+                    )
+            except (BrokenPipeError, ConnectionResetError, TimeoutError):
+                return
 
         def do_POST(self):
             if self.path not in ("/api/jog", "/api/stop"):

@@ -27,6 +27,8 @@ def generate_launch_description():
     )
     nodes.extend(
         [
+            DeclareLaunchArgument("derive_rcm_from_current", default_value="true"),
+            DeclareLaunchArgument("rcm_distance_from_tip_m", default_value="0.15"),
             DeclareLaunchArgument("velocity_scaling", default_value="0.02"),
             DeclareLaunchArgument("acceleration_scaling", default_value="0.02"),
             DeclareLaunchArgument("max_rcm_rotation_deg", default_value="2.0"),
@@ -34,28 +36,37 @@ def generate_launch_description():
         ]
     )
 
-    for side, prefix in (("left", "left_"), ("right", "right_")):
-        moveit_config = (
-            MoveItConfigsBuilder("rm_65_description", package_name="rm_65_config")
-            .robot_description(
-                file_path="config/rm_65_6fb_description.urdf.xacro",
-                mappings={"link6_type": "Link6_6fb"},
-            )
-            .trajectory_execution(file_path="config/moveit_controllers.yaml")
-            .to_moveit_configs()
+    moveit_config = (
+        MoveItConfigsBuilder("rm_65_description", package_name="rm_65_config")
+        .robot_description(
+            file_path="config/rm_65_6fb_description.urdf.xacro",
+            mappings={"link6_type": "Link6_6fb"},
         )
+        .trajectory_execution(file_path="config/moveit_controllers.yaml")
+        .to_moveit_configs()
+    )
+
+    for side, prefix in (("left", "left_"), ("right", "right_")):
         namespace = f"{side}_arm"
         remappings = [
             ("/joint_states", "moveit_joint_states"),
+            ("joint_states", "moveit_joint_states"),
             ("/tf", "tf"),
+            ("tf", "tf"),
             ("/tf_static", "tf_static"),
+            ("tf_static", "tf_static"),
         ]
         rcm_parameters = moveit_config.to_dict()
         rcm_parameters.update(
             {
                 "use_sim_time": False,
                 "planning_group": "rm_group",
-                "derive_rcm_from_current": False,
+                "derive_rcm_from_current": ParameterValue(
+                    LaunchConfiguration("derive_rcm_from_current"), value_type=bool
+                ),
+                "rcm_distance_from_tip_m": ParameterValue(
+                    LaunchConfiguration("rcm_distance_from_tip_m"), value_type=float
+                ),
                 "rcm_x": ParameterValue(
                     LaunchConfiguration(f"{side}_rcm_x"), value_type=float
                 ),
@@ -102,6 +113,7 @@ def generate_launch_description():
                             "joint_prefix": prefix,
                         }
                     ],
+                    prefix="/usr/bin/python3",
                     output="screen",
                 ),
                 Node(
@@ -109,7 +121,7 @@ def generate_launch_description():
                     executable="robot_state_publisher",
                     namespace=namespace,
                     name="robot_state_publisher",
-                    parameters=[{"robot_description": moveit_config.robot_description}],
+                    parameters=[moveit_config.robot_description],
                     remappings=remappings,
                     output="screen",
                 ),

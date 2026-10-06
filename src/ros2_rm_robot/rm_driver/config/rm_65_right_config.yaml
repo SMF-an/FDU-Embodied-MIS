@@ -10,7 +10,7 @@ rm_driver:
     tool_payload_kg: 0.05
     tool_com_z_m: 0.125
     verify_movej: true
-    udp_ip: "192.168.1.101"
+    udp_ip: "192.168.1.100"
     udp_cycle: 5
     udp_port: 8089
     udp_force_coordinate: 0

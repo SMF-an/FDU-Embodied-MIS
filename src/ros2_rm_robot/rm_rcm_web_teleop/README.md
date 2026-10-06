@@ -41,18 +41,24 @@ ros2 launch rm_bringup rm_65_6fb_rcm_real.launch.py \
 
 ## 双臂真机使用
 
-双臂入口为左右臂分别启动 MoveIt 和 RCM 节点，再由双栏 Web 页面分别控制。启动时必须提供两臂各自在 `base_link` 坐标系下标定的 RCM 坐标；漏传参数时默认使用非有限值，RCM 节点会拒绝初始化。
+双臂入口为左右臂分别启动 MoveIt 和 RCM 节点，再由双栏 Web 页面分别控制。默认读取各臂启动时的器具尖端位姿，并沿当前器具轴线向后 0.15 m 推导 RCM 点，不需要手动传入坐标。推导点不是尖端本身；若 RCM 与初始尖端重合，运动半径为零，无法执行有效倾转。
 
 ```bash
-ros2 launch rm_bringup rm_65_dual_6fb_rcm_real.launch.py \
-  left_rcm_x:=LEFT_X_M left_rcm_y:=LEFT_Y_M left_rcm_z:=LEFT_Z_M \
-  right_rcm_x:=RIGHT_X_M right_rcm_y:=RIGHT_Y_M right_rcm_z:=RIGHT_Z_M
+ros2 launch rm_bringup rm_65_dual_6fb_rcm_real.launch.py
 ```
 
-将 `LEFT_X_M` 等占位符替换为实际标定值。之后在另一个终端启动双臂网页：
+可用 `rcm_distance_from_tip_m` 调整默认推导距离。若要使用标定后的固定点，增加 `derive_rcm_from_current:=false` 并传入左右臂各自 `base_link` 坐标系下的 `left_rcm_x/y/z` 与 `right_rcm_x/y/z`。默认推导点不等于真实套管/穿刺孔位置。之后在另一个终端启动双臂网页：
 
 ```bash
 ros2 launch rm_rcm_web_teleop dual_web_teleop.launch.py
 ```
 
-页面左侧控制左臂，右侧控制右臂。任一侧步进执行期间，另一侧会暂时锁定。两套单臂 MoveIt 会话各自在本臂模型内规划；目前没有双臂联合碰撞检测，操作前必须确认工作空间分离，并确保没有其他程序同时下发运动命令。双臂网页停止按钮只向对应手臂发送软件停止请求，不替代控制柜急停。
+页面左侧控制左臂，中央显示 RealSense RGB 画面，右侧控制右臂。默认图像话题为 `/camera/camera/color/image_raw`，可覆盖为实际发布的话题：
+
+```bash
+ros2 launch rm_rcm_web_teleop dual_web_teleop.launch.py camera_topic:=/camera/camera/color/image_raw
+```
+
+页面通过 ROS 订阅图像并以 MJPEG 提供给浏览器；需安装 `cv_bridge` 和 `sensor_msgs` 运行依赖。任一侧步进执行期间，另一侧会暂时锁定。两套单臂 MoveIt 会话各自在本臂模型内规划；目前没有双臂联合碰撞检测，操作前必须确认工作空间分离，并确保没有其他程序同时下发运动命令。双臂网页停止按钮只向对应手臂发送软件停止请求，不替代控制柜急停。
+
+相机画面旁的“录制”按钮会使用浏览器录制当前 RGB 画面；点击“停止并保存”后，浏览器自动下载带时间戳的 `.webm` 文件。录制期间视频暂存于浏览器内存，请在关闭或刷新页面前停止录制；需使用支持 `MediaRecorder` 和 Canvas `captureStream` 的浏览器。相机离线时录制按钮不可用。

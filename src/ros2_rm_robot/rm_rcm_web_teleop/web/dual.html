@@ -24,24 +24,33 @@
       background: #101713; color: var(--text);
       font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
     }
-    main { width: min(1320px, 100%); margin: 0 auto; }
+    main { width: min(1680px, 100%); margin: 0 auto; }
     header { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
     h1 { margin: 0; font-size: 24px; font-weight: 650; }
     .subtitle { color: var(--muted); margin: 3px 0 0; font-size: 13px; }
     .system-status { color: var(--muted); font-size: 13px; white-space: nowrap; }
-    .arms { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-    .arm { min-width: 0; padding: 18px 20px 20px; }
-    .arm + .arm { border-left: 1px solid var(--line); }
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(225px, .78fr) minmax(420px, 1.5fr) minmax(225px, .78fr);
+      grid-template-areas: "left camera right";
+      align-items: stretch;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+    .arm { min-width: 0; padding: 16px 14px 18px; }
+    .arm-left { grid-area: left; }
+    .arm-right { grid-area: right; border-left: 1px solid var(--line); }
+    .camera-panel { grid-area: camera; min-width: 0; padding: 16px; border-left: 1px solid var(--line); }
     .arm-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 13px; border-bottom: 1px solid var(--line); }
     h2 { margin: 0; font-size: 18px; font-weight: 620; }
     .arm-status { color: var(--muted); font-size: 12px; }
     .arm-status.ready { color: var(--green); }
     .arm-status.busy { color: var(--amber); }
-    .controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, .8fr); gap: 22px; align-items: center; padding-top: 18px; }
+    .controls { display: grid; grid-template-columns: 1fr; gap: 15px; align-items: center; padding-top: 15px; }
     .control-label { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
     .pad-wrap { display: grid; justify-items: center; }
     .pad {
-      width: min(27vw, 230px); min-width: 145px; aspect-ratio: 1; border-radius: 50%; position: relative;
+      width: min(14vw, 185px); min-width: 132px; aspect-ratio: 1; border-radius: 50%; position: relative;
       border: 1px solid #597262; background:
         linear-gradient(90deg, transparent 49.7%, #78928133 50%, transparent 50.3%),
         linear-gradient(transparent 49.7%, #78928133 50%, transparent 50.3%),
@@ -52,9 +61,9 @@
     .pad::after { inset: 34%; }
     .knob { width: 30%; aspect-ratio: 1; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); border-radius: 50%; border: 2px solid #d3f7df; background: #65c987; box-shadow: 0 0 18px #67cf8b55; pointer-events: none; }
     .pad-caption { margin-top: 8px; color: var(--muted); font-size: 11px; text-align: center; }
-    .moves { display: grid; gap: 9px; }
+    .moves { display: grid; gap: 8px; }
     button { font: inherit; cursor: pointer; }
-    .move { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 11px; border: 1px solid #46614f; border-radius: 6px; color: var(--text); background: #20372a; text-align: left; touch-action: none; user-select: none; }
+    .move { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid #46614f; border-radius: 6px; color: var(--text); background: #20372a; text-align: left; touch-action: none; user-select: none; }
     .move:active, .move.held { background: #326244; }
     .move small { display: block; margin-top: 2px; color: #b3d4bd; font-size: 10px; }
     .move .symbol { color: #b8f3cd; font-size: 20px; }
@@ -65,15 +74,57 @@
     .message { min-height: 20px; margin: 11px 0 0; color: var(--muted); font-size: 12px; }
     .message.error { color: #ff9e9e; }
     footer { margin-top: 13px; color: var(--muted); font-size: 12px; }
+    .camera-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+    .camera-head h2 { font-size: 16px; }
+    .camera-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+    .camera-status { color: var(--muted); font-size: 12px; text-align: right; }
+    .camera-status.online { color: var(--green); }
+    .record-button { min-height: 36px; display: inline-flex; align-items: center; gap: 8px; padding: 6px 11px; border: 1px solid #79504c; border-radius: 5px; background: #352321; color: #ffe4df; }
+    .record-button:disabled { opacity: .45; cursor: not-allowed; }
+    .record-dot { width: 9px; aspect-ratio: 1; border-radius: 50%; background: #f07777; }
+    .record-button.recording { border-color: #d65d5d; background: #5a2929; }
+    .record-button.recording .record-dot { animation: record-pulse 1.2s ease-in-out infinite; }
+    @keyframes record-pulse { 50% { opacity: .35; } }
+    .camera-stage {
+      position: relative;
+      display: grid;
+      place-items: center;
+      width: 100%;
+      aspect-ratio: 16 / 10;
+      overflow: hidden;
+      border: 1px solid #40534a;
+      border-radius: 5px;
+      background: #090d0b;
+    }
+    .camera-image { width: 100%; height: 100%; object-fit: contain; opacity: 0; }
+    .camera-image.visible { opacity: 1; }
+    .camera-placeholder { position: absolute; display: grid; gap: 7px; justify-items: center; color: #a7b5ab; font-size: 13px; text-align: center; padding: 16px; }
+    .camera-placeholder[hidden] { display: none; }
+    .camera-placeholder strong { color: #e2ece5; font-size: 15px; font-weight: 600; }
+    .camera-topic { margin-top: 9px; overflow-wrap: anywhere; color: var(--muted); font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    @media (max-width: 1100px) {
+      .workspace {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        grid-template-areas: "camera camera" "left right";
+      }
+      .camera-panel { border-left: 0; border-bottom: 1px solid var(--line); }
+      .arm-right { border-left: 1px solid var(--line); }
+      .controls { grid-template-columns: minmax(0, 1fr) minmax(130px, .8fr); gap: 14px; }
+      .pad { width: min(20vw, 185px); }
+    }
     @media (max-width: 720px) {
       body { padding: 13px 12px 22px; }
       header { align-items: flex-start; }
       h1 { font-size: 20px; }
-      .arms { grid-template-columns: 1fr; }
+      .workspace {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-areas: "camera" "left" "right";
+      }
+      .camera-panel { padding: 12px 4px 15px; }
       .arm { padding: 14px 4px 17px; }
-      .arm + .arm { border-left: 0; border-top: 1px solid var(--line); }
+      .arm-right { border-left: 0; border-top: 1px solid var(--line); }
       .controls { grid-template-columns: minmax(0, 1fr) minmax(140px, .8fr); gap: 14px; }
-      .pad { width: min(46vw, 210px); }
+      .pad { width: min(38vw, 185px); }
     }
     @media (max-width: 380px) {
       .controls { grid-template-columns: 1fr; }
@@ -91,8 +142,8 @@
       </div>
       <div id="systemStatus" class="system-status">双臂状态待同步</div>
     </header>
-    <div class="arms">
-      <section class="arm" data-arm="left">
+    <div class="workspace">
+      <section class="arm arm-left" data-arm="left">
         <div class="arm-head"><h2>左臂</h2><span class="arm-status" id="leftStatus">等待状态</span></div>
         <div class="controls">
           <div>
@@ -111,7 +162,26 @@
         <div class="readout"><span class="pill" id="leftPosition">尖端：等待状态</span><span class="pill" id="leftDepth">距 RCM：--</span><span class="pill" id="leftStep">步长：--</span></div>
         <p class="message" id="leftMessage" role="status">等待左臂 RCM 状态。</p>
       </section>
-      <section class="arm" data-arm="right">
+      <section class="camera-panel" aria-label="实时相机画面">
+        <div class="camera-head">
+          <h2>实时相机</h2>
+          <div class="camera-actions">
+            <span id="cameraStatus" class="camera-status">等待 RGB 图像</span>
+            <button id="recordButton" class="record-button" type="button" disabled aria-pressed="false" title="录制当前 RGB 画面并保存为 WebM">
+              <span class="record-dot" aria-hidden="true"></span><span id="recordButtonLabel">录制</span>
+            </button>
+          </div>
+        </div>
+        <div class="camera-stage">
+          <img id="cameraImage" class="camera-image" src="/camera.mjpg" alt="RealSense 实时 RGB 画面">
+          <div id="cameraPlaceholder" class="camera-placeholder">
+            <strong>等待相机画面</strong>
+            <span>确认 RealSense 节点正在发布 RGB 图像</span>
+          </div>
+        </div>
+        <div id="cameraTopic" class="camera-topic">/camera/camera/color/image_raw</div>
+      </section>
+      <section class="arm arm-right" data-arm="right">
         <div class="arm-head"><h2>右臂</h2><span class="arm-status" id="rightStatus">等待状态</span></div>
         <div class="controls">
           <div>
@@ -138,6 +208,105 @@
     const controllers = {};
     let state = null;
     let sideStates = {};
+    const cameraImage = document.getElementById('cameraImage');
+    const recordButton = document.getElementById('recordButton');
+    const recordButtonLabel = document.getElementById('recordButtonLabel');
+    let mediaRecorder = null;
+    let recordingChunks = [];
+    let recordingCanvas = null;
+    let recordingContext = null;
+    let recordingStream = null;
+    let recordingFrame = null;
+
+    function setRecordButton(recording, label = recording ? '停止并保存' : '录制') {
+      recordButton.classList.toggle('recording', recording);
+      recordButton.setAttribute('aria-pressed', String(recording));
+      recordButtonLabel.textContent = label;
+    }
+
+    function saveRecording() {
+      const blob = new Blob(recordingChunks, { type: mediaRecorder?.mimeType || 'video/webm' });
+      recordingChunks = [];
+      if (blob.size) {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        link.href = url;
+        link.download = `rgb-recording-${timestamp}.webm`;
+        link.click();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+      recordingStream?.getTracks().forEach(track => track.stop());
+      recordingStream = null;
+      mediaRecorder = null;
+      setRecordButton(false);
+      recordButton.disabled = !state?.camera?.available || !recordingSupported();
+      document.getElementById('cameraStatus').textContent = blob.size ? '视频已保存' : '没有录到视频帧';
+    }
+
+    function recordingSupported() {
+      return Boolean(window.MediaRecorder && HTMLCanvasElement.prototype.captureStream);
+    }
+
+    function toggleRecording() {
+      if (mediaRecorder?.state === 'recording') {
+        setRecordButton(false, '正在保存…');
+        recordButton.disabled = true;
+        mediaRecorder.stop();
+        return;
+      }
+      if (!state?.camera?.available || !cameraImage.complete || !cameraImage.naturalWidth) return;
+      if (!recordingSupported()) {
+        document.getElementById('cameraStatus').textContent = '当前浏览器不支持录制';
+        return;
+      }
+
+      recordingCanvas = document.createElement('canvas');
+      recordingCanvas.width = cameraImage.naturalWidth;
+      recordingCanvas.height = cameraImage.naturalHeight;
+      recordingContext = recordingCanvas.getContext('2d');
+      recordingContext.drawImage(cameraImage, 0, 0, recordingCanvas.width, recordingCanvas.height);
+      recordingStream = recordingCanvas.captureStream(15);
+      const mimeType = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
+        .find(type => MediaRecorder.isTypeSupported(type));
+      try {
+        mediaRecorder = new MediaRecorder(recordingStream, mimeType ? { mimeType } : {});
+      } catch (error) {
+        recordingStream.getTracks().forEach(track => track.stop());
+        recordingStream = null;
+        document.getElementById('cameraStatus').textContent = `无法启动录制：${error.message}`;
+        return;
+      }
+      recordingChunks = [];
+      mediaRecorder.addEventListener('dataavailable', event => {
+        if (event.data.size) recordingChunks.push(event.data);
+      });
+      mediaRecorder.addEventListener('stop', saveRecording, { once: true });
+      mediaRecorder.addEventListener('error', () => {
+        document.getElementById('cameraStatus').textContent = '录制失败';
+      }, { once: true });
+      mediaRecorder.start(1000);
+      setRecordButton(true);
+      recordButton.disabled = false;
+      recordingFrame = window.setInterval(() => {
+        if (mediaRecorder?.state === 'recording' && cameraImage.complete) {
+          recordingContext.drawImage(cameraImage, 0, 0, recordingCanvas.width, recordingCanvas.height);
+        }
+      }, 1000 / 15);
+      mediaRecorder.addEventListener('stop', () => {
+        window.clearInterval(recordingFrame);
+        recordingFrame = null;
+      }, { once: true });
+      document.getElementById('cameraStatus').textContent = '正在录制 RGB';
+    }
+
+    recordButton.addEventListener('click', toggleRecording);
+
+    cameraImage.addEventListener('error', () => {
+      window.setTimeout(() => {
+        cameraImage.src = `/camera.mjpg#${Date.now()}`;
+      }, 1200);
+    });
 
     function showMessage(side, text, isError = false) {
       const el = document.getElementById(`${side}Message`);
@@ -254,6 +423,17 @@
         const response = await fetch('/api/state', { cache: 'no-store' });
         state = await response.json();
         sideStates = state.arms;
+        const camera = state.camera;
+        const cameraStatus = document.getElementById('cameraStatus');
+        cameraStatus.textContent = camera.available
+          ? `${camera.width} × ${camera.height} · 在线`
+          : '等待 RGB 图像';
+        cameraStatus.classList.toggle('online', camera.available);
+        document.getElementById('cameraImage').classList.toggle('visible', camera.available);
+        document.getElementById('cameraPlaceholder').hidden = camera.available;
+        document.getElementById('cameraTopic').textContent = camera.topic;
+        recordButton.disabled = !camera.available || !recordingSupported() ||
+          recordButtonLabel.textContent === '正在保存…';
         const modeName = state.mode === 'real' ? '真机' : '仿真';
         document.getElementById('mode').textContent = `RM65-6FB ${modeName}双臂控制`;
         const systemStatus = document.getElementById('systemStatus');
@@ -289,6 +469,10 @@
       } catch (_error) {
         document.getElementById('mode').textContent = '遥控服务未连接';
         document.getElementById('systemStatus').textContent = '服务未连接';
+        document.getElementById('cameraStatus').textContent = '服务未连接';
+        document.getElementById('cameraStatus').classList.remove('online');
+        document.getElementById('cameraImage').classList.remove('visible');
+        document.getElementById('cameraPlaceholder').hidden = false;
         for (const side of sides) {
           document.getElementById(`${side}Status`).textContent = '服务未连接';
           showMessage(side, '无法连接遥控服务，请确认 ROS 节点正在运行。', true);
