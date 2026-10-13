@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f3f6f4">
+  <title>具身微创操作 | 任务监控</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page: #f3f6f4;
+      --surface: #ffffff;
+      --ink: #17231d;
+      --muted: #68776f;
+      --line: #d9e1dc;
+      --green: #177a4c;
+      --green-soft: #e6f4ec;
+      --amber: #986514;
+      --amber-soft: #fff3d8;
+      --red: #a32626;
+      --red-dark: #791b1b;
+      --red-soft: #fae9e7;
+      --gray-soft: #edf1ee;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--page);
+      color: var(--ink);
+      font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    button { font: inherit; cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: .45; }
+    .topbar {
+      min-height: 62px;
+      padding: 0 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--line);
+    }
+    .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .brand-mark {
+      width: 30px; height: 30px; display: grid; place-items: center;
+      border-radius: 4px; background: var(--green); color: white;
+      font-weight: 750; font-size: 12px;
+    }
+    .brand-name { font-size: 15px; font-weight: 700; }
+    .brand-divider { width: 1px; height: 22px; background: var(--line); }
+    .brand-view { color: var(--muted); }
+    .top-state { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #9aa69f; flex: 0 0 auto; }
+    .dot.ok { background: var(--green); }
+    .dot.warn { background: #c3871a; }
+    .dot.bad { background: var(--red); }
+    main { max-width: 1500px; margin: 0 auto; padding: 22px 28px 106px; }
+    .page-heading {
+      display: flex; align-items: end; justify-content: space-between;
+      gap: 18px; margin-bottom: 18px;
+    }
+    h1 { margin: 0; font-size: 23px; line-height: 1.2; font-weight: 700; }
+    .heading-meta { color: var(--muted); margin-top: 5px; font-size: 12px; }
+    .updated { color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .system-strip {
+      display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+      background: var(--surface); border: 1px solid var(--line); border-radius: 5px;
+      margin-bottom: 16px;
+    }
+    .system-item { min-width: 0; padding: 12px 15px; border-right: 1px solid var(--line); }
+    .system-item:last-child { border-right: 0; }
+    .system-label { color: var(--muted); font-size: 11px; margin-bottom: 5px; }
+    .system-value { display: flex; align-items: center; gap: 7px; font-weight: 650; min-width: 0; }
+    .system-detail { color: var(--muted); font-size: 11px; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .main-grid {
+      display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(300px, .82fr);
+      gap: 16px; align-items: stretch;
+    }
+    .panel { min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 5px; }
+    .panel-heading {
+      min-height: 48px; padding: 0 15px; display: flex; align-items: center;
+      justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--line);
+    }
+    h2 { font-size: 14px; font-weight: 700; margin: 0; }
+    .panel-hint { color: var(--muted); font-size: 11px; }
+    .camera-wrap {
+      position: relative; aspect-ratio: 16 / 9; min-height: 240px;
+      display: grid; place-items: center; overflow: hidden; background: #111815;
+    }
+    .camera-wrap img { display: block; width: 100%; height: 100%; object-fit: contain; }
+    .camera-empty {
+      position: absolute; inset: 0; display: grid; place-items: center;
+      padding: 20px; color: #ccd5d0; text-align: center; background: #111815;
+    }
+    .camera-empty[hidden] { display: none; }
+    .camera-foot {
+      min-height: 38px; padding: 7px 13px; display: flex; align-items: center;
+      justify-content: space-between; gap: 10px; color: var(--muted); font-size: 11px;
+    }
+    .mask-legend {
+      display: flex; flex-wrap: wrap; gap: 7px 13px; padding: 0 13px 11px;
+      color: var(--muted); font-size: 10px;
+    }
+    .legend-item { display: inline-flex; align-items: center; gap: 5px; }
+    .legend-swatch { width: 9px; height: 9px; border-radius: 2px; }
+    .mission-body { padding: 16px; }
+    .mission-top { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
+    .task-id { color: var(--muted); font-size: 11px; }
+    .phase { margin-top: 4px; font-size: 19px; font-weight: 720; overflow-wrap: anywhere; }
+    .state-tag { flex: 0 0 auto; border-radius: 4px; padding: 4px 8px; font-size: 11px; font-weight: 700; background: var(--gray-soft); color: var(--muted); }
+    .state-tag.active { background: var(--green-soft); color: var(--green); }
+    .state-tag.wait { background: var(--amber-soft); color: var(--amber); }
+    .state-tag.error { background: var(--red-soft); color: var(--red); }
+    .progress-label { display: flex; justify-content: space-between; margin: 20px 0 7px; color: var(--muted); font-size: 11px; }
+    .progress-track { width: 100%; height: 7px; background: #e7ece9; border-radius: 2px; overflow: hidden; }
+    .progress-fill { height: 100%; width: 0; background: var(--green); transition: width .25s ease; }
+    .mission-message { min-height: 58px; margin-top: 15px; padding: 10px 11px; border-left: 3px solid #9bad9f; background: #f5f8f6; color: #39473f; font-size: 12px; overflow-wrap: anywhere; }
+    .scene-line { margin-top: 13px; display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 11px; }
+    .systems-lower { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .72fr); gap: 16px; margin-top: 16px; }
+    .arm-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .arm-col { min-width: 0; padding: 14px 15px; }
+    .arm-col + .arm-col { border-left: 1px solid var(--line); }
+    .arm-title { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .arm-name { font-weight: 700; }
+    .inline-status { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; }
+    .status-row { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-top: 1px solid #edf0ee; font-size: 12px; }
+    .status-row span:first-child { color: var(--muted); }
+    .status-row span:last-child { text-align: right; overflow-wrap: anywhere; }
+    .servo-list { padding: 4px 15px 12px; }
+    .servo-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 0; border-bottom: 1px solid #edf0ee; }
+    .servo-item:last-child { border-bottom: 0; }
+    .servo-meta { min-width: 0; }
+    .servo-name { font-size: 12px; font-weight: 650; }
+    .servo-port { color: var(--muted); font-size: 10px; margin-top: 3px; }
+    .servo-state { display: flex; align-items: center; gap: 6px; font-size: 11px; white-space: nowrap; }
+    .command-bar {
+      position: fixed; z-index: 5; inset: auto 0 0; min-height: 76px;
+      display: flex; align-items: center; justify-content: center; gap: 12px;
+      padding: 12px 24px; background: #ffffffed; border-top: 1px solid var(--line);
+      backdrop-filter: blur(10px);
+    }
+    .command-inner { width: min(1500px, 100%); display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .command-note { color: var(--muted); font-size: 11px; }
+    .command-actions { display: flex; gap: 10px; }
+    .command-button { min-width: 156px; min-height: 44px; padding: 9px 18px; border: 0; border-radius: 4px; font-weight: 750; }
+    .start-button { background: var(--green); color: #fff; }
+    .start-button:hover:not(:disabled) { background: #12643e; }
+    .estop-button { min-width: 138px; background: var(--red); color: #fff; }
+    .estop-button:hover:not(:disabled) { background: var(--red-dark); }
+    .toast {
+      position: fixed; z-index: 10; left: 50%; bottom: 92px; transform: translateX(-50%);
+      max-width: min(600px, calc(100vw - 24px)); padding: 10px 14px; border-radius: 4px;
+      background: #17231d; color: white; box-shadow: 0 5px 18px #17231d33;
+    }
+    .toast[hidden] { display: none; }
+    @media (max-width: 1000px) {
+      main { padding-inline: 16px; }
+      .topbar { padding-inline: 16px; }
+      .system-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .system-item:nth-child(3) { border-right: 0; }
+      .system-item:nth-child(n+4) { border-top: 1px solid var(--line); }
+      .main-grid { grid-template-columns: minmax(0, 1.3fr) minmax(275px, .8fr); }
+    }
+    @media (max-width: 720px) {
+      .topbar { min-height: 54px; }
+      .brand-name { font-size: 13px; }
+      .brand-view { font-size: 12px; }
+      .top-state { font-size: 11px; }
+      main { padding: 16px 12px 100px; }
+      .page-heading { align-items: start; flex-direction: column; gap: 6px; }
+      h1 { font-size: 20px; }
+      .system-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .system-item { border-top: 1px solid var(--line); }
+      .system-item:nth-child(-n+2) { border-top: 0; }
+      .system-item:nth-child(3) { border-right: 1px solid var(--line); }
+      .system-item:nth-child(even) { border-right: 0; }
+      .main-grid, .systems-lower { grid-template-columns: minmax(0, 1fr); }
+      .camera-wrap { min-height: 0; }
+      .arm-col { padding: 12px; }
+      .command-bar { min-height: 72px; padding: 10px 12px; }
+      .command-inner { align-items: stretch; }
+      .command-note { display: none; }
+      .command-actions { width: 100%; }
+      .command-button { min-width: 0; flex: 1; padding-inline: 8px; }
+      .toast { bottom: 82px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">MIS</div>
+      <div class="brand-name">具身微创辅助操作</div>
+      <div class="brand-divider"></div>
+      <div class="brand-view">任务执行监控</div>
+    </div>
+    <div class="top-state"><span id="overallDot" class="dot"></span><span id="overallText">连接检查中</span></div>
+  </header>
+
+  <main>
+    <div class="page-heading">
+      <div>
+        <h1>任务执行监控</h1>
+        <div class="heading-meta">双臂 RCM 视觉伺服 · 实时状态</div>
+      </div>
+      <div id="updatedAt" class="updated">等待系统状态</div>
+    </div>
+
+    <section class="system-strip" aria-label="系统连接">
+      <div class="system-item">
+        <div class="system-label">任务状态机</div>
+        <div class="system-value"><span id="managerDot" class="dot"></span><span id="managerState">连接中</span></div>
+        <div class="system-detail">/task/status</div>
+      </div>
+      <div class="system-item">
+        <div class="system-label">任务执行器</div>
+        <div class="system-value"><span id="executorDot" class="dot"></span><span id="executorState">连接中</span></div>
+        <div class="system-detail">RCM visual servo</div>
+      </div>
+      <div class="system-item">
+        <div class="system-label">视觉感知</div>
+        <div class="system-value"><span id="perceptionDot" class="dot"></span><span id="perceptionState">等待数据</span></div>
+        <div id="sceneDetail" class="system-detail">/perception/scene</div>
+      </div>
+      <div class="system-item">
+        <div class="system-label">感知叠加流</div>
+        <div class="system-value"><span id="cameraDot" class="dot"></span><span id="cameraState">等待图像</span></div>
+        <div id="cameraDetail" class="system-detail">/camera/camera/color/image_raw</div>
+      </div>
+      <div class="system-item">
+        <div class="system-label">机械臂状态</div>
+        <div class="system-value"><span id="armsDot" class="dot"></span><span id="armsState">检查中</span></div>
+        <div class="system-detail">关节状态 + RCM 位姿</div>
+      </div>
+    </section>
+
+    <section class="main-grid">
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>实时感知画面</h2>
+          <span id="cameraResolution" class="panel-hint">--</span>
+        </div>
+        <div class="camera-wrap">
+          <img id="cameraFeed" src="/camera.mjpg" alt="实时手术区域相机画面">
+          <div id="cameraEmpty" class="camera-empty" hidden>等待相机图像</div>
+        </div>
+        <div class="camera-foot"><span id="cameraTopic">相机数据流</span><span id="cameraAge">--</span></div>
+        <div class="mask-legend" aria-label="分割类别图例">
+          <span class="legend-item"><i class="legend-swatch" style="background:#dc5028"></i>肝脏</span>
+          <span class="legend-item"><i class="legend-swatch" style="background:#c850b4"></i>肾脏</span>
+          <span class="legend-item"><i class="legend-swatch" style="background:#28dc28"></i>胆囊</span>
+          <span class="legend-item"><i class="legend-swatch" style="background:#f0b428"></i>肠道</span>
+          <span class="legend-item"><i class="legend-swatch" style="background:#dcdc00"></i>网膜</span>
+          <span class="legend-item"><i class="legend-swatch" style="background:#2828dc"></i>血管</span>
+          <span class="legend-item"><i class="legend-swatch" style="background:#ff3030"></i>病灶</span>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading"><h2>当前任务</h2><span class="panel-hint">/task/status</span></div>
+        <div class="mission-body">
+          <div class="mission-top">
+            <div>
+              <div id="taskId" class="task-id">尚未开始</div>
+              <div id="phaseName" class="phase">待机</div>
+            </div>
+            <span id="taskStateTag" class="state-tag">未连接</span>
+          </div>
+          <div class="progress-label"><span>整体进度</span><span id="progressValue">0%</span></div>
+          <div class="progress-track"><div id="progressFill" class="progress-fill"></div></div>
+          <div id="missionMessage" class="mission-message">等待任务状态</div>
+          <div class="scene-line"><span>目标坐标系</span><span id="sceneFrame">--</span></div>
+          <div class="scene-line"><span>场景状态</span><span id="sceneStatus">等待感知数据</span></div>
+        </div>
+      </section>
+    </section>
+
+    <section class="systems-lower">
+      <section class="panel">
+        <div class="panel-heading"><h2>机械臂连接</h2><span class="panel-hint">关节状态与 RCM 节点心跳</span></div>
+        <div class="arm-grid">
+          <div class="arm-col">
+            <div class="arm-title"><span class="arm-name">左臂</span><span id="leftArmStatus" class="inline-status"><span class="dot"></span>检查中</span></div>
+            <div class="status-row"><span>驱动状态流</span><span id="leftDriverStatus">等待</span></div>
+            <div class="status-row"><span>RCM 状态</span><span id="leftRcmStatus">等待</span></div>
+            <div class="status-row"><span>当前运动</span><span id="leftBusyStatus">未知</span></div>
+            <div class="status-row"><span>控制器急停回执</span><span id="leftEstopAck">无</span></div>
+          </div>
+          <div class="arm-col">
+            <div class="arm-title"><span class="arm-name">右臂</span><span id="rightArmStatus" class="inline-status"><span class="dot"></span>检查中</span></div>
+            <div class="status-row"><span>驱动状态流</span><span id="rightDriverStatus">等待</span></div>
+            <div class="status-row"><span>RCM 状态</span><span id="rightRcmStatus">等待</span></div>
+            <div class="status-row"><span>当前运动</span><span id="rightBusyStatus">未知</span></div>
+            <div class="status-row"><span>控制器急停回执</span><span id="rightEstopAck">无</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading"><h2>末端舵机</h2><span class="panel-hint">SCS215 通信检测</span></div>
+        <div class="servo-list">
+          <div class="servo-item">
+            <div class="servo-meta"><div class="servo-name">左侧舵机</div><div id="leftServoPort" class="servo-port">--</div></div>
+            <div id="leftServoStatus" class="servo-state"><span class="dot"></span>检查中</div>
+          </div>
+          <div class="servo-item">
+            <div class="servo-meta"><div class="servo-name">右侧舵机</div><div id="rightServoPort" class="servo-port">--</div></div>
+            <div id="rightServoStatus" class="servo-state"><span class="dot"></span>检查中</div>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <footer class="command-bar">
+    <div class="command-inner">
+      <div id="commandNote" class="command-note">开始前需感知、任务执行器与双臂 RCM 状态就绪</div>
+      <div class="command-actions">
+        <button id="startButton" class="command-button start-button" type="button" disabled>开始任务</button>
+        <button id="estopButton" class="command-button estop-button" type="button">急停</button>
+      </div>
+    </div>
+  </footer>
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const labels = {
+      IDLE: "待机", WAITING_FOR_SCENE: "等待感知", WAITING_FOR_EXECUTOR: "等待执行器",
+      EXECUTING: "执行中", COMPLETED: "已完成", ABORTED: "已中止", UNKNOWN: "未连接"
+    };
+    const phases = {
+      identify_and_plan: "目标识别与规划",
+      approach_and_avoid: "双臂安全接近",
+      left_arm_expose_lesion: "左臂接近病灶",
+      dual_arm_coordinated_dissect_boundary: "边界操作路点",
+      retrieve_lesion: "病灶取出路点"
+    };
+    let toastTimer;
+    function setIndicator(id, value, text) {
+      const root = $(id);
+      const dot = root.querySelector(".dot") || root;
+      dot.classList.remove("ok", "warn", "bad");
+      dot.classList.add(value ? "ok" : "bad");
+      const label = root.querySelector("span:last-child");
+      if (label && label !== dot) label.textContent = text;
+    }
+    function setSimpleIndicator(dotId, textId, online, onlineText, offlineText) {
+      $(dotId).className = `dot ${online ? "ok" : "bad"}`;
+      $(textId).textContent = online ? onlineText : offlineText;
+    }
+    function showToast(message) {
+      const toast = $("toast");
+      toast.textContent = message;
+      toast.hidden = false;
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => { toast.hidden = true; }, 3200);
+    }
+    function ageText(age) {
+      return Number.isFinite(age) ? `${age.toFixed(1)} s` : "--";
+    }
+    function paintArm(side, arm) {
+      const tag = $(`${side}ArmStatus`);
+      const dataOnline = arm.joint_state_online && arm.rcm_online;
+      const statusClass = !dataOnline ? "bad" : arm.rcm_valid && arm.collision_scene_ready ? "ok" : "warn";
+      const statusText = !dataOnline ? "RCM 未连接" : !arm.rcm_valid ? "RCM 几何异常" : !arm.collision_scene_ready ? "避障场景未同步" : arm.tilt_allowed ? "在线" : "轴向模式";
+      tag.innerHTML = `<span class="dot ${statusClass}"></span>${statusText}`;
+      $(`${side}DriverStatus`).textContent = arm.joint_state_online ? "在线" : "无数据";
+      if (!arm.rcm_online) {
+        $(`${side}RcmStatus`).textContent = "等待位姿/RCM 点话题";
+      } else if (!arm.frame_match) {
+        $(`${side}RcmStatus`).textContent = "坐标系不一致";
+      } else if (arm.geometry_error) {
+        $(`${side}RcmStatus`).textContent = "尖端姿态无效";
+      } else if (arm.tip_radius_m > 1.0) {
+        $(`${side}RcmStatus`).textContent = `尖端距 RCM ${arm.tip_radius_m.toFixed(3)} m，超出范围`;
+      } else if (arm.rcm_error_mm > 2.0) {
+        $(`${side}RcmStatus`).textContent = `器具轴线偏差 ${arm.rcm_error_mm.toFixed(1)} mm，限值 2 mm`;
+      } else if (!arm.tilt_allowed) {
+        $(`${side}RcmStatus`).textContent = `尖端距 RCM ${Math.round(arm.tip_radius_m * 1000)} mm · 仅轴向运动，倾转锁定`;
+      } else {
+        $(`${side}RcmStatus`).textContent = `有效 · ${arm.frame || ""}`;
+      }
+      $(`${side}BusyStatus`).textContent = arm.busy ? "运动中" : (arm.online ? "空闲" : "未知");
+      $(`${side}EstopAck`).textContent = arm.estop_ack === true ? "已接受" : arm.estop_ack === false ? "拒绝" : "等待";
+    }
+    function paintServo(side, servo) {
+      const node = $(`${side}ServoStatus`);
+      node.innerHTML = `<span class="dot ${servo.connected ? "ok" : "bad"}"></span>${servo.connected ? "在线" : "离线"}`;
+      $(`${side}ServoPort`).textContent = `${servo.port || "未配置"} · ${servo.message || ""}`;
+    }
+    function paint(state) {
+      const mission = state.mission;
+      setSimpleIndicator("managerDot", "managerState", state.systems.task_manager, "在线", "未连接");
+      setSimpleIndicator("executorDot", "executorState", state.systems.executor, "在线", "未连接");
+      setSimpleIndicator("perceptionDot", "perceptionState", state.systems.perception, "场景有效", "未就绪");
+      setSimpleIndicator("cameraDot", "cameraState", state.camera.online, "在线", "无图像");
+      setSimpleIndicator("armsDot", "armsState", state.systems.arms_ready, "双臂就绪", "未就绪");
+      $("sceneDetail").textContent = `${state.scene.status || ""} · 障碍物：${state.scene.obstacles_status || "待同步"} · ${ageText(state.scene.age_sec)}`;
+      $("cameraDetail").textContent = state.camera.topic;
+      $("cameraTopic").textContent = state.camera.topic;
+      $("cameraResolution").textContent = state.camera.width ? `${state.camera.width} × ${state.camera.height}` : "--";
+      $("cameraAge").textContent = state.camera.online ? `图像延迟 ${ageText(state.camera.age_sec)}` : "图像流中断";
+      $("cameraEmpty").hidden = state.camera.online;
+      $("cameraFeed").style.visibility = state.camera.online ? "visible" : "hidden";
+
+      $("taskId").textContent = mission.online && mission.task_id ? `任务 ${mission.task_id}` : (mission.online ? "等待开始" : "状态机未连接");
+      $("phaseName").textContent = mission.step ? (phases[mission.step] || mission.step) : labels[mission.state] || "待机";
+      const tag = $("taskStateTag");
+      tag.textContent = labels[mission.state] || mission.state;
+      tag.className = `state-tag ${mission.state === "EXECUTING" ? "active" : ["WAITING_FOR_SCENE", "WAITING_FOR_EXECUTOR"].includes(mission.state) ? "wait" : ["ABORTED"].includes(mission.state) ? "error" : ""}`;
+      const progress = Math.max(0, Math.min(100, mission.progress * 100));
+      $("progressValue").textContent = `${Math.round(progress)}%`;
+      $("progressFill").style.width = `${progress}%`;
+      $("missionMessage").textContent = mission.message || "等待任务状态";
+      $("sceneFrame").textContent = state.scene.frame || "--";
+      $("sceneStatus").textContent = state.scene.status || "等待感知数据";
+      paintArm("left", state.arms.left);
+      paintArm("right", state.arms.right);
+      paintServo("left", state.arms.left.servo);
+      paintServo("right", state.arms.right.servo);
+
+      const ready = state.can_start;
+      $("startButton").disabled = !ready;
+      $("commandNote").textContent = state.estop.latched
+        ? "急停已锁定，请检查机械臂控制器并重启 dashboard"
+        : ready ? "系统就绪" : (state.start_blockers[0] || "等待系统就绪");
+      $("estopButton").disabled = state.estop.latched;
+      $("overallDot").className = `dot ${state.estop.latched ? "bad" : ready ? "ok" : "warn"}`;
+      $("overallText").textContent = state.estop.latched ? "急停已触发" : ready ? "系统就绪" : "准备中";
+      $("updatedAt").textContent = `更新于 ${new Date().toLocaleTimeString("zh-CN", { hour12: false })}`;
+    }
+    async function refresh() {
+      try {
+        const response = await fetch("/api/state", { cache: "no-store" });
+        if (!response.ok) throw new Error("状态服务不可用");
+        paint(await response.json());
+      } catch (error) {
+        $("overallDot").className = "dot bad";
+        $("overallText").textContent = "监控服务断开";
+      }
+    }
+    async function post(path) {
+      const response = await fetch(path, { method: "POST" });
+      const result = await response.json();
+      if (!response.ok || !result.accepted) throw new Error(result.message || result.error || "操作失败");
+      showToast(result.message || "命令已发送");
+      refresh();
+    }
+    $("startButton").addEventListener("click", async () => {
+      $("startButton").disabled = true;
+      try { await post("/api/start"); }
+      catch (error) { showToast(error.message); refresh(); }
+    });
+    $("estopButton").addEventListener("click", async () => {
+      if (!window.confirm("确认立即急停双臂并取消当前任务？急停后需检查控制器状态。")) return;
+      $("estopButton").disabled = true;
+      try { await post("/api/estop"); }
+      catch (error) { showToast(error.message); }
+      refresh();
+    });
+    $("cameraFeed").addEventListener("error", () => {
+      $("cameraEmpty").hidden = false;
+      $("cameraEmpty").textContent = "相机画面暂不可用";
+    });
+    refresh();
+    setInterval(refresh, 500);
+  </script>
+</body>
+</html>

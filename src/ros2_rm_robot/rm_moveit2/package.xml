@@ -14,6 +14,7 @@
   <depend>moveit_msgs</depend>
   <depend>moveit_ros_planning_interface</depend>
   <depend>rclcpp</depend>
+  <depend>shape_msgs</depend>
   <depend>std_msgs</depend>
   <depend>visualization_msgs</depend>
   <depend>rm_ros_interfaces</depend>

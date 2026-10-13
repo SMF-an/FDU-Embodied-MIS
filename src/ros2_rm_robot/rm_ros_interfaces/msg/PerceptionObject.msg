@@ -1,0 +1,15 @@
+string class_name
+bool detected
+bool position_valid
+bool world_position_valid
+float32 quality_score
+uint32 mask_pixels
+uint32 valid_depth_pixels
+float32 valid_depth_ratio
+float32 depth_median_m
+float32 depth_mad_m
+geometry_msgs/Point position_camera
+geometry_msgs/Point position_world
+bool obstacle_geometry_valid
+geometry_msgs/Point obstacle_bounds_min_world
+geometry_msgs/Point obstacle_bounds_max_world

@@ -1,3 +1,5 @@
+import json
+import math
 import os
 
 from ament_index_python.packages import get_package_share_directory
@@ -11,6 +13,39 @@ from moveit_configs_utils import MoveItConfigsBuilder
 
 
 def generate_launch_description():
+    package_share = get_package_share_directory("rm_bringup")
+    workspace_root = os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(package_share)))
+    )
+    calibration_path = os.path.join(
+        workspace_root, "data", "calibration", "dual_rcm_points.json"
+    )
+    calibration = {}
+    try:
+        with open(calibration_path, "r", encoding="utf-8") as stream:
+            document = json.load(stream)
+        if (
+            isinstance(document, dict)
+            and document.get("format") == "rm_dual_rcm_points_v2"
+            and isinstance(document.get("arms"), dict)
+        ):
+            calibration = document.get("arms", {})
+    except (OSError, ValueError, AttributeError):
+        pass
+
+    calibrated_arms = {}
+    for side in ("left", "right"):
+        point = calibration.get(side, {})
+        if not isinstance(point, dict):
+            continue
+        values = (point.get("x"), point.get("y"), point.get("z"))
+        if (
+            point.get("frame_id") == "world"
+            and all(isinstance(value, (int, float)) and math.isfinite(value) for value in values)
+        ):
+            calibrated_arms[side] = values
+    use_saved_points = len(calibrated_arms) == 2
+
     driver_launch = os.path.join(
         get_package_share_directory("rm_driver"),
         "launch",
@@ -21,18 +56,25 @@ def generate_launch_description():
     ]
 
     nodes.extend(
-        DeclareLaunchArgument(f"{side}_rcm_{axis}", default_value="nan")
+        DeclareLaunchArgument(
+            f"{side}_rcm_{axis}",
+            default_value=(
+                str(calibrated_arms[side][index]) if side in calibrated_arms else "nan"
+            ),
+        )
         for side in ("left", "right")
-        for axis in ("x", "y", "z")
+        for index, axis in enumerate(("x", "y", "z"))
     )
     nodes.extend(
         [
-            DeclareLaunchArgument("derive_rcm_from_current", default_value="true"),
+            DeclareLaunchArgument(
+                "derive_rcm_from_current", default_value="false" if use_saved_points else "true"
+            ),
             DeclareLaunchArgument("rcm_distance_from_tip_m", default_value="0.15"),
             DeclareLaunchArgument("velocity_scaling", default_value="0.02"),
             DeclareLaunchArgument("acceleration_scaling", default_value="0.02"),
-            DeclareLaunchArgument("max_rcm_rotation_deg", default_value="2.0"),
-            DeclareLaunchArgument("max_rcm_insertion_m", default_value="0.002"),
+            DeclareLaunchArgument("max_rcm_rotation_deg", default_value="8.0"),
+            DeclareLaunchArgument("max_rcm_insertion_m", default_value="0.010"),
         ]
     )
 

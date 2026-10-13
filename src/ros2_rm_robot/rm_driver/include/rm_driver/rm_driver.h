@@ -312,6 +312,8 @@ public:
     void Set_Pos_Teach_Callback(rm_ros_interfaces::msg::Posteach::SharedPtr msg);                           //位置示教
     void Set_Ort_Teach_Callback(rm_ros_interfaces::msg::Ortteach::SharedPtr msg);                           //姿态示教
     void Set_Stop_Teach_Callback(const std_msgs::msg::Empty::SharedPtr msg);                                //停止示教
+    void Start_Drag_Teach_Callback(const std_msgs::msg::Empty::SharedPtr msg);
+    void Stop_Drag_Teach_Callback(const std_msgs::msg::Empty::SharedPtr msg);
 
     /*******************************主动上报回调函数******************************/
     void Arm_Get_Realtime_Push_Callback(const std_msgs::msg::Empty::SharedPtr msg);                         //获取主动上报配置
@@ -498,6 +500,10 @@ private:
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr Set_Stop_Teach_Cmd_Result;
     /*******************************************停止示教订阅器*************************************/
     rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr Set_Stop_Teach_Cmd;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr Start_Drag_Teach_Cmd_Result;
+    rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr Start_Drag_Teach_Cmd;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr Stop_Drag_Teach_Cmd_Result;
+    rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr Stop_Drag_Teach_Cmd;
     /********************************************************end******************************************************/
 
     /********************************************************适配四代控制器新增***************************************************/

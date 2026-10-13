@@ -8,15 +8,15 @@
   <style>
     :root {
       color-scheme: dark;
-      --bg: #101713;
-      --surface: #19231e;
-      --surface-2: #202d26;
-      --line: #33443a;
-      --text: #edf5ef;
-      --muted: #9baea1;
-      --green: #74d69a;
-      --amber: #f0b85c;
-      --red: #f07777;
+      --bg: #0b1110;
+      --surface: #172320;
+      --surface-2: #1d2c27;
+      --line: #293b33;
+      --text: #e6f0eb;
+      --muted: #91a69b;
+      --green: #5bc48a;
+      --amber: #d7ad62;
+      --red: #e16b6b;
     }
     * { box-sizing: border-box; }
     body {
@@ -29,6 +29,15 @@
     h1 { margin: 0; font-size: 24px; font-weight: 650; }
     .subtitle { color: var(--muted); margin: 3px 0 0; font-size: 13px; }
     .system-status { color: var(--muted); font-size: 13px; white-space: nowrap; }
+    .teaching { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 5px; background: #141d17; }
+    .toolbar-group { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; min-width: 0; }
+    .teaching-label { color: var(--muted); font-size: 12px; }
+    .teach-button { min-height: 34px; padding: 6px 11px; border: 1px solid #4b6856; border-radius: 5px; background: #243b2c; color: var(--text); }
+    .teach-button.stop { border-color: #79504c; background: #352321; color: #ffe4df; }
+    .teach-button:disabled { opacity: .45; cursor: not-allowed; }
+    .teaching-status { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+    .mode-button { min-height: 34px; padding: 6px 11px; border: 1px solid #4b6856; border-radius: 5px; background: #1c2a20; color: var(--muted); }
+    .mode-button.active { border-color: #b29a55; background: #514425; color: var(--text); }
     .workspace {
       display: grid;
       grid-template-columns: minmax(225px, .78fr) minmax(420px, 1.5fr) minmax(225px, .78fr);
@@ -62,6 +71,7 @@
     .knob { width: 30%; aspect-ratio: 1; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); border-radius: 50%; border: 2px solid #d3f7df; background: #65c987; box-shadow: 0 0 18px #67cf8b55; pointer-events: none; }
     .pad-caption { margin-top: 8px; color: var(--muted); font-size: 11px; text-align: center; }
     .moves { display: grid; gap: 8px; }
+    .roll-moves { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     button { font: inherit; cursor: pointer; }
     .move { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid #46614f; border-radius: 6px; color: var(--text); background: #20372a; text-align: left; touch-action: none; user-select: none; }
     .move:active, .move.held { background: #326244; }
@@ -73,6 +83,14 @@
     .pill { border: 1px solid #324339; border-radius: 5px; background: #141d17; color: #bfcec3; padding: 5px 8px; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
     .message { min-height: 20px; margin: 11px 0 0; color: var(--muted); font-size: 12px; }
     .message.error { color: #ff9e9e; }
+    .gripper { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 15px; padding: 12px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .gripper-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+    .gripper-title { font-size: 13px; font-weight: 600; }
+    .gripper-status { color: var(--muted); font-size: 11px; text-align: right; overflow-wrap: anywhere; }
+    .gripper-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .gripper-button { min-height: 42px; border: 1px solid #486c72; border-radius: 5px; background: #1d3438; color: #d7f0f0; }
+    .gripper-button.close { border-color: #80633d; background: #3b3022; color: #f4dfbd; }
+    .gripper-button:disabled { opacity: .42; cursor: not-allowed; }
     footer { margin-top: 13px; color: var(--muted); font-size: 12px; }
     .camera-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
     .camera-head h2 { font-size: 16px; }
@@ -131,20 +149,162 @@
       .moves { grid-template-columns: 1fr 1fr; }
       .stop { grid-column: 1 / -1; }
     }
+
+    body { padding: 14px 18px 22px; background: var(--bg); }
+    main { width: min(1880px, 100%); }
+    button { transition: background-color .12s ease, border-color .12s ease, color .12s ease, opacity .12s ease; }
+    button:focus-visible, summary:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+    button:disabled { opacity: .38; }
+    header.topbar { min-height: 60px; margin-bottom: 12px; padding-bottom: 11px; border-bottom: 1px solid var(--line); }
+    h1 { font-size: 20px; font-weight: 650; }
+    .subtitle { margin-top: 2px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+    .status-tray { display: flex; align-items: center; justify-content: center; gap: 7px; flex-wrap: wrap; }
+    .status-item { display: inline-flex; align-items: center; gap: 7px; min-height: 30px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 5px; background: #111a17; color: var(--muted); font-size: 11px; white-space: nowrap; }
+    .status-light { width: 7px; height: 7px; border-radius: 50%; background: #65766c; }
+    .status-item.online { color: var(--text); }
+    .status-item.online .status-light { background: var(--green); }
+    .status-item.busy .status-light { background: var(--amber); }
+    .global-stop { min-height: 36px; padding: 6px 12px; border: 1px solid #7b4143; border-radius: 5px; background: #382426; color: #ffdede; font-size: 12px; font-weight: 650; }
+    .global-stop:hover:not(:disabled), .stop:hover:not(:disabled) { background: #512c2f; border-color: var(--red); }
+    .motion-toolbar { display: flex; align-items: center; gap: 14px; min-height: 54px; margin-bottom: 12px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+    .motion-title { min-width: 86px; font-size: 12px; font-weight: 600; }
+    .mode-options { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid var(--line); border-radius: 5px; background: #101916; }
+    .mode-button { min-height: 30px; padding: 4px 12px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--muted); font-size: 12px; }
+    .mode-button:hover:not(.active) { background: var(--surface-2); color: var(--text); }
+    .mode-button.active { border-color: #426752; background: #284337; color: #ccebd9; }
+    .motion-readout { margin-left: auto; color: var(--muted); font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .workspace { gap: 10px; border: 0; grid-template-columns: minmax(280px, .85fr) minmax(520px, 1.7fr) minmax(280px, .85fr); }
+    .arm, .camera-panel { min-width: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+    .arm { padding: 13px; }
+    .arm-right, .camera-panel { border-left: 1px solid var(--line); }
+    .arm-head { min-height: 40px; padding: 0 0 10px; }
+    .arm-name { display: flex; align-items: center; gap: 9px; }
+    .arm-index { display: grid; place-items: center; width: 25px; height: 25px; border: 1px solid #385144; border-radius: 4px; color: var(--green); font: 11px ui-monospace, monospace; }
+    h2 { font-size: 15px; font-weight: 620; }
+    .arm-status { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; white-space: nowrap; }
+    .arm-status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #65766c; }
+    .arm-status.ready::before { background: var(--green); }
+    .arm-status.busy::before { background: var(--amber); }
+    .controls { grid-template-columns: minmax(114px, .9fr) minmax(126px, 1.1fr); gap: 12px; align-items: start; padding-top: 12px; }
+    .control-label { margin-bottom: 8px; color: #b2c3b9; font-size: 11px; font-weight: 600; }
+    .pad { width: clamp(112px, 10vw, 158px); min-width: 0; border-color: #466255; background:
+      linear-gradient(90deg, transparent 49.7%, #7da28a26 50%, transparent 50.3%),
+      linear-gradient(transparent 49.7%, #7da28a26 50%, transparent 50.3%),
+      radial-gradient(circle, #21342b 0 2px, #17241e 68%); box-shadow: inset 0 0 18px #0003; }
+    .pad::before, .pad::after { border-color: #86a29224; }
+    .knob { border-color: #bbebcf; background: var(--green); box-shadow: 0 0 0 4px #5bc48a1c; transition: left .06s ease-out, top .06s ease-out; }
+    .pad-caption { max-width: 170px; font-size: 10px; }
+    .moves { grid-template-columns: 1fr 1fr; gap: 6px; }
+    .move { min-width: 0; min-height: 42px; justify-content: center; padding: 6px 7px; border-color: #385246; border-radius: 5px; background: #22372c; font-size: 11px; text-align: center; }
+    .move:hover:not(:disabled) { border-color: #59836b; background: #294538; }
+    .move:active, .move.held { background: #355c45; }
+    .move small { color: var(--muted); font-size: 9px; }
+    .move .symbol { color: #b5e5c7; font-size: 17px; }
+    .roll-moves { grid-column: 1 / -1; gap: 6px; }
+    .stop { grid-column: 1 / -1; min-height: 34px; border: 1px solid #704044; border-radius: 5px; background: #342326; color: #f1c9c9; font-size: 11px; }
+    .readout { gap: 5px; margin-top: 11px; padding-top: 9px; border-top-color: var(--line); }
+    .pill { border-color: #30443a; border-radius: 4px; background: #111a16; color: #b8c9bf; padding: 4px 6px; font-size: 10px; }
+    .message { margin: 7px 0 0; min-height: 18px; font-size: 11px; }
+    .gripper { margin-top: 10px; padding: 9px 0; border-top-color: var(--line); border-bottom-color: var(--line); }
+    .gripper-title { font-size: 11px; }
+    .gripper-status { font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .gripper-button, .gripper-button.close { min-height: 34px; border-radius: 4px; font-size: 11px; }
+    .gripper-button { border-color: #3c6953; background: #284337; color: #d9f0e2; }
+    .gripper-button.close { border-color: #596748; background: #303b2c; color: #e4ead8; }
+    .gripper-button:hover:not(:disabled) { filter: brightness(1.12); }
+    details.teaching-panel { margin-top: 10px; border: 1px solid var(--line); border-radius: 5px; background: #121b17; }
+    details.teaching-panel summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 36px; padding: 7px 9px; color: #bdcec4; cursor: pointer; font-size: 11px; font-weight: 600; list-style: none; }
+    details.teaching-panel summary::-webkit-details-marker { display: none; }
+    details.teaching-panel summary::after { content: "+"; color: var(--muted); font: 15px ui-monospace, monospace; }
+    details.teaching-panel[open] summary::after { content: "−"; }
+    .teach-summary { margin-left: auto; color: var(--muted); font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 400; }
+    .camera-panel { padding: 12px; display: flex; flex-direction: column; }
+    .camera-head { min-height: 36px; margin-bottom: 9px; }
+    .camera-head h2 { font-size: 13px; }
+    .camera-actions { gap: 9px; }
+    .camera-status { font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .record-button { min-height: 32px; padding: 5px 9px; border-color: #704044; border-radius: 4px; background: #342326; font-size: 11px; }
+    .record-button:hover:not(:disabled) { background: #492b2d; }
+    .record-dot { width: 7px; }
+    .camera-stage { flex: 1; min-height: 250px; aspect-ratio: 16 / 10; border-color: #33483d; border-radius: 4px; background: #080e0c; }
+    .camera-image { object-fit: contain; }
+    .camera-placeholder { gap: 8px; color: #91a69b; font-size: 11px; }
+    .camera-placeholder strong { color: #c8d8ce; font-size: 12px; }
+    .camera-placeholder::before { content: "RGB"; display: grid; place-items: center; width: 42px; height: 30px; margin-bottom: 3px; border: 1px solid #34493d; border-radius: 4px; color: #789183; font: 10px ui-monospace, monospace; }
+    .camera-topic { margin-top: 8px; font-size: 10px; }
+    .teaching-panel { margin-top: 12px; }
+    .teaching-panel summary { min-height: 40px !important; }
+    .teaching-body { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 0 10px 10px; }
+    .teach-button { min-height: 32px; padding: 5px 10px; border-color: #3d5b49; border-radius: 4px; background: #20352a; font-size: 11px; }
+    .teach-button:hover:not(:disabled) { background: #294637; }
+    .teach-button.stop { border-color: #704044; background: #342326; color: #edcaca; }
+    .teaching-status { min-width: 0; font-size: 10px; }
+    footer { margin-top: 10px; color: #73867b; font-size: 10px; }
+    @media (max-width: 1280px) {
+      body { padding: 12px; }
+      .workspace { grid-template-columns: minmax(250px, .85fr) minmax(400px, 1.3fr) minmax(250px, .85fr); }
+      .controls { grid-template-columns: 1fr; }
+      .pad { width: min(15vw, 150px); }
+      .pad-wrap { justify-items: start; }
+    }
+    @media (max-width: 980px) {
+      header.topbar { align-items: flex-start; flex-wrap: wrap; }
+      .status-tray { order: 3; width: 100%; justify-content: flex-start; }
+      .global-stop { margin-left: auto; }
+      .workspace { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "camera camera" "left right"; }
+      .camera-panel { border-left: 1px solid var(--line); }
+      .controls { grid-template-columns: minmax(110px, .9fr) minmax(125px, 1fr); }
+      .pad { width: min(20vw, 150px); }
+      .pad-wrap { justify-items: center; }
+    }
+    @media (max-width: 680px) {
+      body { padding: 10px; }
+      header.topbar { gap: 10px; }
+      .status-tray { gap: 5px; }
+      .status-item { min-height: 27px; padding: 4px 7px; font-size: 10px; }
+      .motion-toolbar { flex-wrap: wrap; gap: 8px; }
+      .motion-title { min-width: auto; }
+      .motion-readout { width: 100%; margin-left: 0; }
+      .workspace { grid-template-columns: minmax(0, 1fr); grid-template-areas: "camera" "left" "right"; }
+      .camera-panel { border-left: 1px solid var(--line); }
+      .arm-right { border-left: 1px solid var(--line); }
+      .controls { grid-template-columns: minmax(120px, .85fr) minmax(145px, 1.15fr); }
+      .pad { width: min(36vw, 158px); }
+      .camera-stage { min-height: 210px; }
+    }
+    @media (max-width: 380px) {
+      .controls { grid-template-columns: 1fr; }
+      .pad-wrap { justify-items: center; }
+    }
   </style>
 </head>
 <body>
   <main>
-    <header>
+    <header class="topbar">
       <div>
         <h1>双臂 RCM 遥控器</h1>
         <p id="mode" class="subtitle">连接遥控服务中</p>
       </div>
-      <div id="systemStatus" class="system-status">双臂状态待同步</div>
+      <div class="status-tray" aria-label="系统连接状态">
+        <span id="rosStatus" class="status-item"><i class="status-light"></i>ROS2 · 连接中</span>
+        <span id="headerLeftStatus" class="status-item"><i class="status-light"></i>左臂 · 同步中</span>
+        <span id="headerRightStatus" class="status-item"><i class="status-light"></i>右臂 · 同步中</span>
+        <span id="cameraGlobalStatus" class="status-item"><i class="status-light"></i>相机 · 等待图像</span>
+      </div>
+      <button id="globalStop" class="global-stop" type="button" disabled title="停止当前正在运动的机械臂">全局停止</button>
+      <span id="systemStatus" class="system-status" hidden>双臂状态待同步</span>
     </header>
+    <section class="motion-toolbar" aria-label="运动步长">
+      <span class="motion-title">运动步长</span>
+      <div class="mode-options">
+        <button id="fineMode" class="mode-button active" type="button">精细</button>
+        <button id="largeMode" class="mode-button" type="button">大步长</button>
+      </div>
+      <span id="motionModeStatus" class="motion-readout">倾转 2° / 滚转 2° / 进退 5 mm</span>
+    </section>
     <div class="workspace">
       <section class="arm arm-left" data-arm="left">
-        <div class="arm-head"><h2>左臂</h2><span class="arm-status" id="leftStatus">等待状态</span></div>
+        <div class="arm-head"><div class="arm-name"><span class="arm-index">01</span><h2>左臂</h2></div><span class="arm-status" id="leftStatus">等待状态</span></div>
         <div class="controls">
           <div>
             <div class="control-label">器具旋转</div>
@@ -155,16 +315,28 @@
             <div class="moves">
               <button class="move" id="leftAdvance" type="button"><span>向前插入<small>沿器具轴线</small></span><span class="symbol">＋</span></button>
               <button class="move" id="leftRetract" type="button"><span>向后退出<small>沿器具轴线</small></span><span class="symbol">－</span></button>
+              <div class="roll-moves" aria-label="左臂末端第六轴滚转">
+                <button class="move" id="leftRollMinus" type="button" title="绕器具轴反向滚转">第6轴 −</button>
+                <button class="move" id="leftRollPlus" type="button" title="绕器具轴正向滚转">第6轴 ＋</button>
+              </div>
               <button class="stop" id="leftStop" type="button">停止左臂</button>
             </div>
           </div>
         </div>
+        <section class="gripper" aria-label="左臂舵机夹爪">
+          <div class="gripper-head"><span class="gripper-title">末端舵机</span><span class="gripper-status" id="leftGripperStatus">等待串口连接</span></div>
+          <div class="gripper-actions">
+            <button class="gripper-button" id="leftGripperOpen" type="button" disabled>打开</button>
+            <button class="gripper-button close" id="leftGripperClose" type="button" disabled>闭合</button>
+          </div>
+        </section>
+        <div class="readout"><span class="pill" id="leftCalibration">RCM 标定：未加载</span></div>
         <div class="readout"><span class="pill" id="leftPosition">尖端：等待状态</span><span class="pill" id="leftDepth">距 RCM：--</span><span class="pill" id="leftStep">步长：--</span></div>
         <p class="message" id="leftMessage" role="status">等待左臂 RCM 状态。</p>
       </section>
       <section class="camera-panel" aria-label="实时相机画面">
         <div class="camera-head">
-          <h2>实时相机</h2>
+            <h2>实时相机</h2>
           <div class="camera-actions">
             <span id="cameraStatus" class="camera-status">等待 RGB 图像</span>
             <button id="recordButton" class="record-button" type="button" disabled aria-pressed="false" title="录制当前 RGB 画面并保存为 WebM">
@@ -182,7 +354,7 @@
         <div id="cameraTopic" class="camera-topic">/camera/camera/color/image_raw</div>
       </section>
       <section class="arm arm-right" data-arm="right">
-        <div class="arm-head"><h2>右臂</h2><span class="arm-status" id="rightStatus">等待状态</span></div>
+        <div class="arm-head"><div class="arm-name"><span class="arm-index">02</span><h2>右臂</h2></div><span class="arm-status" id="rightStatus">等待状态</span></div>
         <div class="controls">
           <div>
             <div class="control-label">器具旋转</div>
@@ -193,19 +365,43 @@
             <div class="moves">
               <button class="move" id="rightAdvance" type="button"><span>向前插入<small>沿器具轴线</small></span><span class="symbol">＋</span></button>
               <button class="move" id="rightRetract" type="button"><span>向后退出<small>沿器具轴线</small></span><span class="symbol">－</span></button>
+              <div class="roll-moves" aria-label="右臂末端第六轴滚转">
+                <button class="move" id="rightRollMinus" type="button" title="绕器具轴反向滚转">第6轴 −</button>
+                <button class="move" id="rightRollPlus" type="button" title="绕器具轴正向滚转">第6轴 ＋</button>
+              </div>
               <button class="stop" id="rightStop" type="button">停止右臂</button>
             </div>
           </div>
         </div>
+        <section class="gripper" aria-label="右臂舵机夹爪">
+          <div class="gripper-head"><span class="gripper-title">末端舵机</span><span class="gripper-status" id="rightGripperStatus">等待串口连接</span></div>
+          <div class="gripper-actions">
+            <button class="gripper-button" id="rightGripperOpen" type="button" disabled>打开</button>
+            <button class="gripper-button close" id="rightGripperClose" type="button" disabled>闭合</button>
+          </div>
+        </section>
+        <div class="readout"><span class="pill" id="rightCalibration">RCM 标定：未加载</span></div>
         <div class="readout"><span class="pill" id="rightPosition">尖端：等待状态</span><span class="pill" id="rightDepth">距 RCM：--</span><span class="pill" id="rightStep">步长：--</span></div>
         <p class="message" id="rightMessage" role="status">等待右臂 RCM 状态。</p>
       </section>
     </div>
-    <footer>一次只执行一侧的步进命令；停止按钮发送软件停止请求，不替代控制柜急停。</footer>
+    <details class="teaching-panel">
+      <summary><span>双臂轨迹记录</span><span id="teachSummary" class="teach-summary">未记录</span></summary>
+      <div class="teaching-body">
+        <button id="teachStart" class="teach-button" type="button">开始记录</button>
+        <button id="teachStop" class="teach-button stop" type="button" disabled>停止并保存</button>
+        <span id="teachStatus" class="teaching-status">记录已接受的左右臂目标位姿</span>
+      </div>
+    </details>
+    <footer>一次只执行一侧的步进命令；全局停止发送现有软件停止请求，不替代控制柜急停。</footer>
   </main>
   <script>
     const sides = ['left', 'right'];
     const controllers = {};
+    const gripperState = {
+      left: { busy: false, message: '' },
+      right: { busy: false, message: '' }
+    };
     let state = null;
     let sideStates = {};
     const cameraImage = document.getElementById('cameraImage');
@@ -217,6 +413,33 @@
     let recordingContext = null;
     let recordingStream = null;
     let recordingFrame = null;
+    const teachStart = document.getElementById('teachStart');
+    const teachStop = document.getElementById('teachStop');
+    const teachStatus = document.getElementById('teachStatus');
+    const fineMode = document.getElementById('fineMode');
+    const largeMode = document.getElementById('largeMode');
+    const motionModeStatus = document.getElementById('motionModeStatus');
+    const globalStop = document.getElementById('globalStop');
+    const teachSummary = document.getElementById('teachSummary');
+
+    globalStop.addEventListener('click', async () => {
+      const activeSides = sides.filter(side => sideStates[side]?.busy);
+      if (!activeSides.length) return;
+      globalStop.disabled = true;
+      await Promise.all(activeSides.map(side => stop(side)));
+      await poll();
+    });
+
+    async function setMotionMode(mode) {
+      try {
+        await post('/api/motion-mode', { mode });
+        await poll();
+      } catch (error) {
+        document.getElementById('systemStatus').textContent = error.message;
+      }
+    }
+    fineMode.addEventListener('click', () => setMotionMode('fine'));
+    largeMode.addEventListener('click', () => setMotionMode('large'));
 
     function setRecordButton(recording, label = recording ? '停止并保存' : '录制') {
       recordButton.classList.toggle('recording', recording);
@@ -302,6 +525,28 @@
 
     recordButton.addEventListener('click', toggleRecording);
 
+    async function startTeaching() {
+      try {
+        await post('/api/teaching/start', {});
+        teachStatus.textContent = '正在记录：0 个已接受动作';
+      } catch (error) {
+        teachStatus.textContent = `开始记录失败：${error.message}`;
+      }
+    }
+
+    async function stopTeaching() {
+      teachStop.disabled = true;
+      try {
+        const result = await post('/api/teaching/stop', {});
+        teachStatus.textContent = `已保存 ${result.message}：${result.path}`;
+      } catch (error) {
+        teachStatus.textContent = `保存失败：${error.message}`;
+      }
+    }
+
+    teachStart.addEventListener('click', startTeaching);
+    teachStop.addEventListener('click', stopTeaching);
+
     cameraImage.addEventListener('error', () => {
       window.setTimeout(() => {
         cameraImage.src = `/camera.mjpg#${Date.now()}`;
@@ -328,6 +573,7 @@
         knob: document.getElementById(`${side}Knob`),
         joystick: { x: 0, y: 0, active: false },
         insertion: 0,
+        roll: 0,
         waiting: false,
         sawBusy: false,
         sentAt: 0,
@@ -367,7 +613,22 @@
         button.addEventListener('pointercancel', release);
         button.addEventListener('lostpointercapture', release);
       }
+      for (const [id, value] of [[`${side}RollPlus`, 1], [`${side}RollMinus`, -1]]) {
+        const button = document.getElementById(id);
+        const release = () => { controller.roll = 0; button.classList.remove('held'); };
+        button.addEventListener('pointerdown', event => {
+          event.preventDefault();
+          button.setPointerCapture(event.pointerId);
+          controller.roll = value;
+          button.classList.add('held');
+        });
+        button.addEventListener('pointerup', release);
+        button.addEventListener('pointercancel', release);
+        button.addEventListener('lostpointercapture', release);
+      }
       document.getElementById(`${side}Stop`).addEventListener('click', () => stop(side));
+      document.getElementById(`${side}GripperOpen`).addEventListener('click', () => gripperAction(side, 'open'));
+      document.getElementById(`${side}GripperClose`).addEventListener('click', () => gripperAction(side, 'close'));
     }
 
     async function post(path, body) {
@@ -379,18 +640,35 @@
       return result;
     }
 
+    async function gripperAction(side, action) {
+      const controls = gripperState[side];
+      controls.busy = true;
+      controls.message = action === 'open' ? '正在打开舵机…' : '正在闭合舵机…';
+      poll();
+      try {
+        const result = await post(`/api/gripper/${action}`, { arm: side });
+        controls.message = result.message || (action === 'open' ? '打开命令已发送' : '闭合命令已发送');
+      } catch (error) {
+        controls.message = error.message;
+      } finally {
+        controls.busy = false;
+      }
+      poll();
+    }
+
     async function pump(side) {
       const controller = controllers[side];
       const arm = sideStates[side];
       if (controller.sending || !arm?.ready || arm.busy || state?.locked_by || controller.waiting) return;
-      if (!controller.joystick.active && controller.insertion === 0) return;
+      if (!controller.joystick.active && controller.insertion === 0 && controller.roll === 0) return;
       controller.sending = true;
       try {
         await post('/api/jog', {
           arm: side,
           tilt_x: controller.joystick.active ? controller.joystick.x : 0,
           tilt_y: controller.joystick.active ? controller.joystick.y : 0,
-          insertion: controller.insertion
+          insertion: controller.insertion,
+          roll: controller.roll
         });
         controller.waiting = true;
         controller.sawBusy = false;
@@ -407,6 +685,7 @@
     async function stop(side) {
       resetPad(side);
       controllers[side].insertion = 0;
+      controllers[side].roll = 0;
       try {
         await post('/api/stop', { arm: side });
         controllers[side].waiting = true;
@@ -425,6 +704,12 @@
         sideStates = state.arms;
         const camera = state.camera;
         const cameraStatus = document.getElementById('cameraStatus');
+        const rosStatus = document.getElementById('rosStatus');
+        rosStatus.classList.add('online');
+        rosStatus.innerHTML = '<i class="status-light"></i>ROS2 · 在线';
+        const cameraGlobalStatus = document.getElementById('cameraGlobalStatus');
+        cameraGlobalStatus.classList.toggle('online', camera.available);
+        cameraGlobalStatus.innerHTML = `<i class="status-light"></i>相机 · ${camera.available ? '在线' : '等待图像'}`;
         cameraStatus.textContent = camera.available
           ? `${camera.width} × ${camera.height} · 在线`
           : '等待 RGB 图像';
@@ -435,27 +720,70 @@
         recordButton.disabled = !camera.available || !recordingSupported() ||
           recordButtonLabel.textContent === '正在保存…';
         const modeName = state.mode === 'real' ? '真机' : '仿真';
+        const largeMotion = state.motion_mode === 'large';
+        fineMode.classList.toggle('active', !largeMotion);
+        largeMode.classList.toggle('active', largeMotion);
+        motionModeStatus.textContent = `${largeMotion ? '大步长' : '精细调整'}：倾转 ${state.step_angle_deg}° / 滚转 ${state.step_roll_deg}° / 进退 ${state.step_insertion_mm} mm`;
+        const teaching = state.teaching || {};
+        teachStart.disabled = Boolean(teaching.recording);
+        teachStop.disabled = !teaching.recording;
+        if (teaching.recording) {
+          teachStatus.textContent = `正在记录：${teaching.action_count} 个动作 · ${teaching.elapsed_sec.toFixed(1)} 秒`;
+        }
+        teachSummary.textContent = teaching.recording
+          ? `${teaching.action_count} 项 · 记录中`
+          : teaching.action_count ? `已记录 ${teaching.action_count} 项` : '未记录';
         document.getElementById('mode').textContent = `RM65-6FB ${modeName}双臂控制`;
         const systemStatus = document.getElementById('systemStatus');
-        systemStatus.textContent = state.locked_by ? `${state.locked_by === 'left' ? '左' : '右'}臂执行中` : '双臂待命';
+        systemStatus.textContent = state.locked_by
+          ? `${state.locked_by === 'left' ? '左' : '右'}臂执行中`
+          : state.gripper_busy
+            ? `${state.gripper_busy === 'left' ? '左' : '右'}臂舵机执行中`
+            : '双臂待命';
         for (const side of sides) {
           const arm = sideStates[side];
           const cap = side[0].toUpperCase() + side.slice(1);
           const status = document.getElementById(`${side}Status`);
           status.classList.toggle('ready', arm.ready && !arm.busy);
           status.classList.toggle('busy', arm.busy);
-          status.textContent = !arm.ready ? '等待状态' : arm.busy ? '运动中' : `${modeName}已连接`;
+          status.textContent = !arm.ready ? '等待状态' : arm.busy ? '运动中' : arm.rcm_initializing ? 'RCM轴向初始化' : `${modeName}已连接`;
+          const headerStatus = document.getElementById(`header${cap}Status`);
+          headerStatus.classList.toggle('online', arm.ready && !arm.busy);
+          headerStatus.classList.toggle('busy', arm.busy);
+          headerStatus.innerHTML = `<i class="status-light"></i>${side === 'left' ? '左' : '右'}臂 · ${!arm.ready ? '等待状态' : arm.busy ? '运动中' : '在线'}`;
           document.getElementById(`${side}Position`).textContent = arm.ready
             ? `尖端：${(arm.tip.x * 1000).toFixed(1)}, ${(arm.tip.y * 1000).toFixed(1)}, ${(arm.tip.z * 1000).toFixed(1)} mm`
             : '尖端：等待状态';
           document.getElementById(`${side}Depth`).textContent = arm.ready
-            ? `距 RCM：${(arm.tip_to_rcm_m * 1000).toFixed(1)} mm` : '距 RCM：--';
-          document.getElementById(`${side}Step`).textContent = `步长：${state.step_angle_deg}° / ${state.step_insertion_mm} mm`;
+            ? `距 RCM：${(arm.tip_to_rcm_m * 1000).toFixed(1)} mm${arm.rcm_initializing ? ' · 仅轴向' : ''}` : '距 RCM：--';
+          document.getElementById(`${side}Step`).textContent = `步长：倾转 ${state.step_angle_deg}° / 第6轴 ${state.step_roll_deg}° / ${state.step_insertion_mm} mm`;
+          const gripperControl = gripperState[side];
+          const gripperBlocked = !arm.gripper_ready || Boolean(state.locked_by) || Boolean(state.gripper_busy) || arm.busy ||
+            gripperControl.busy;
+          document.getElementById(`${side}GripperOpen`).disabled = gripperBlocked;
+          document.getElementById(`${side}GripperClose`).disabled = gripperBlocked;
+          const gripperStatus = document.getElementById(`${side}GripperStatus`);
+          gripperStatus.textContent = !arm.gripper_ready
+            ? (arm.gripper_message || '舵机串口未连接')
+            : gripperControl.busy
+              ? gripperControl.message
+              : gripperBlocked
+                ? '机械臂或舵机正在运动'
+                : gripperControl.message || '已连接';
           const lockedOther = state.locked_by && state.locked_by !== side;
-          document.getElementById(`${side}Advance`).disabled = !arm.ready || lockedOther;
-          document.getElementById(`${side}Retract`).disabled = !arm.ready || lockedOther;
-          document.getElementById(`${side}Pad`).style.pointerEvents = (!arm.ready || lockedOther) ? 'none' : 'auto';
+          const motionLocked = Boolean(state.locked_by || state.gripper_busy);
+          document.getElementById(`${side}Advance`).disabled = !arm.ready || motionLocked;
+          const initializing = Boolean(arm.rcm_initializing);
+          const atRetractLimit = initializing && arm.tip_to_rcm_m <= state.step_insertion_mm / 1000 + 1e-4;
+          document.getElementById(`${side}Retract`).disabled = !arm.ready || motionLocked || atRetractLimit;
+          document.getElementById(`${side}RollMinus`).disabled = !arm.ready || motionLocked || initializing;
+          document.getElementById(`${side}RollPlus`).disabled = !arm.ready || motionLocked || initializing;
+          document.getElementById(`${side}Pad`).style.pointerEvents = (!arm.ready || motionLocked || initializing) ? 'none' : 'auto';
           document.getElementById(`${side}Stop`).disabled = !arm.busy || lockedOther;
+          const calibration = state.calibration_points?.[side];
+          document.getElementById(`${side}Calibration`).textContent = calibration
+            ? `RCM：${(calibration.x * 1000).toFixed(1)}, ${(calibration.y * 1000).toFixed(1)}, ${(calibration.z * 1000).toFixed(1)} mm · ${calibration.frame_id}`
+            : 'RCM 标定：未加载';
           const controller = controllers[side];
           if (arm.busy) controller.sawBusy = true;
           if (controller.waiting && controller.sawBusy && !arm.busy) {
@@ -466,15 +794,24 @@
           }
           if (!arm.ready) showMessage(side, arm.message || `等待${cap}臂 RCM 状态。`);
         }
+        globalStop.disabled = !sides.some(side => sideStates[side]?.busy);
       } catch (_error) {
         document.getElementById('mode').textContent = '遥控服务未连接';
         document.getElementById('systemStatus').textContent = '服务未连接';
         document.getElementById('cameraStatus').textContent = '服务未连接';
         document.getElementById('cameraStatus').classList.remove('online');
+        document.getElementById('rosStatus').classList.remove('online');
+        document.getElementById('rosStatus').innerHTML = '<i class="status-light"></i>ROS2 · 未连接';
+        document.getElementById('cameraGlobalStatus').classList.remove('online');
+        document.getElementById('cameraGlobalStatus').innerHTML = '<i class="status-light"></i>相机 · 未连接';
+        globalStop.disabled = true;
         document.getElementById('cameraImage').classList.remove('visible');
         document.getElementById('cameraPlaceholder').hidden = false;
         for (const side of sides) {
           document.getElementById(`${side}Status`).textContent = '服务未连接';
+          const headerStatus = document.getElementById(`header${side[0].toUpperCase() + side.slice(1)}Status`);
+          headerStatus.classList.remove('online', 'busy');
+          headerStatus.innerHTML = `<i class="status-light"></i>${side === 'left' ? '左' : '右'}臂 · 未连接`;
           showMessage(side, '无法连接遥控服务，请确认 ROS 节点正在运行。', true);
         }
       }

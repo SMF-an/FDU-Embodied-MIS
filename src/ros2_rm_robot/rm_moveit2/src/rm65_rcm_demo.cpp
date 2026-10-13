@@ -1,9 +1,12 @@
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
 #include <memory>
+#include <map>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -12,11 +15,17 @@
 
 #include <interactive_markers/interactive_marker_server.hpp>
 #include <moveit/move_group_interface/move_group_interface.h>
+#include <moveit/planning_scene_interface/planning_scene_interface.h>
 #include <moveit/robot_state/robot_state.h>
+#include <moveit_msgs/msg/collision_object.hpp>
 #include <moveit_msgs/msg/robot_trajectory.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <rm_ros_interfaces/msg/perception_scene.hpp>
+#include <shape_msgs/msg/solid_primitive.hpp>
 #include <std_msgs/msg/bool.hpp>
+#include <std_msgs/msg/u_int64.hpp>
 #include <geometry_msgs/msg/point_stamped.hpp>
+#include <geometry_msgs/msg/pose.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <visualization_msgs/msg/interactive_marker.hpp>
 #include <visualization_msgs/msg/interactive_marker_control.hpp>
@@ -54,6 +63,7 @@ public:
     declare_if_missing("rcm_tolerance_m", 0.002);
     declare_if_missing("max_rcm_rotation_deg", 0.0);
     declare_if_missing("max_rcm_insertion_m", 0.0);
+    declare_if_missing("obstacle_scene_update_threshold_m", 0.005);
 
     marker_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>(
       "rcm_demo/markers", rclcpp::QoS(10));
@@ -68,6 +78,17 @@ public:
       [this](geometry_msgs::msg::PoseStamped::ConstSharedPtr target) {
         onWebTarget(target);
       });
+    set_rcm_point_callback_group_ = create_callback_group(
+      rclcpp::CallbackGroupType::MutuallyExclusive);
+    auto set_rcm_point_options = rclcpp::SubscriptionOptions();
+    set_rcm_point_options.callback_group = set_rcm_point_callback_group_;
+    set_rcm_point_sub_ = create_subscription<geometry_msgs::msg::PointStamped>(
+      "rcm_demo/set_rcm_point", rclcpp::QoS(10),
+      [this](geometry_msgs::msg::PointStamped::ConstSharedPtr point) {
+        onSetRcmPoint(point);
+      }, set_rcm_point_options);
+    set_rcm_result_pub_ = create_publisher<std_msgs::msg::Bool>(
+      "rcm_demo/set_rcm_point_result", rclcpp::QoS(10));
     stop_sub_ = create_subscription<std_msgs::msg::Bool>(
       "rcm_demo/stop", rclcpp::QoS(10),
       [this](std_msgs::msg::Bool::ConstSharedPtr stop) {
@@ -76,6 +97,17 @@ public:
           RCLCPP_WARN(get_logger(), "收到 Web 遥控器停止命令");
         }
       });
+    perception_scene_callback_group_ = create_callback_group(
+      rclcpp::CallbackGroupType::MutuallyExclusive);
+    auto perception_scene_options = rclcpp::SubscriptionOptions();
+    perception_scene_options.callback_group = perception_scene_callback_group_;
+    perception_scene_sub_ = create_subscription<rm_ros_interfaces::msg::PerceptionScene>(
+      "/perception/scene", rclcpp::QoS(1),
+      [this](rm_ros_interfaces::msg::PerceptionScene::ConstSharedPtr scene) {
+        onPerceptionScene(scene);
+      }, perception_scene_options);
+    collision_scene_synced_pub_ = create_publisher<std_msgs::msg::UInt64>(
+      "rcm_demo/collision_scene_synced", rclcpp::QoS(1).transient_local());
   }
 
   void waitForInteractiveMotion()
@@ -105,6 +137,8 @@ public:
     move_group_->setMaxAccelerationScalingFactor(
       get_parameter("acceleration_scaling").as_double());
     move_group_->setPlanningTime(get_parameter("planning_time").as_double());
+    planning_scene_interface_ = std::make_unique<
+      moveit::planning_interface::PlanningSceneInterface>(get_namespace());
 
     const double state_wait = get_parameter("current_state_wait_sec").as_double();
     if (!move_group_->startStateMonitor(state_wait)) {
@@ -170,7 +204,7 @@ public:
     const double tip_radius = (start_tip - rcm_point).norm();
     const double initial_error = rcmError(start_tip, shaft_axis, rcm_point);
     const double tolerance = get_parameter("rcm_tolerance_m").as_double();
-    if (tip_radius < 0.02 || tip_radius > 1.0 || !std::isfinite(tolerance) ||
+    if (tip_radius > 1.0 || !std::isfinite(tolerance) ||
       tolerance <= 0.0 || initial_error > tolerance)
     {
       RCLCPP_ERROR(get_logger(),
@@ -179,7 +213,10 @@ public:
         tip_radius, initial_error, tolerance);
       return false;
     }
-    rcm_point_ = rcm_point;
+    {
+      std::lock_guard<std::mutex> lock(rcm_mutex_);
+      rcm_point_ = rcm_point;
+    }
     const double eef_step = get_parameter("eef_step_m").as_double();
     if (!std::isfinite(eef_step) || eef_step <= 0.0 || eef_step > 0.01) {
       RCLCPP_ERROR(get_logger(), "参数范围错误：eef_step_m 必须在 (0, 0.01] m 内");
@@ -198,7 +235,10 @@ public:
           std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
       });
-    RCLCPP_INFO(get_logger(), "RCM 约束已就绪，机械臂保持当前位姿；拖动尖端目标可倾转或沿器具轴插入/退出");
+    RCLCPP_INFO(get_logger(),
+      "RCM 约束已就绪：倾转单步限幅 %.2f 度，轴向单步限幅 %.3f m；机械臂保持当前位姿",
+      get_parameter("max_rcm_rotation_deg").as_double(),
+      get_parameter("max_rcm_insertion_m").as_double());
     return true;
   }
 
@@ -210,6 +250,12 @@ private:
   {
     const Eigen::Vector3d point_from_tip = point - tip;
     return (point_from_tip - point_from_tip.dot(axis) * axis).norm();
+  }
+
+  Eigen::Vector3d currentRcmPoint() const
+  {
+    std::lock_guard<std::mutex> lock(rcm_mutex_);
+    return rcm_point_;
   }
 
   bool isPoseConsistentWithRcm(
@@ -230,11 +276,12 @@ private:
     }
     orientation.normalize();
     const Eigen::Vector3d axis = orientation * Eigen::Vector3d::UnitZ();
-    error = rcmError(tip, axis, rcm_point_);
-    const double radius = (tip - rcm_point_).norm();
+    const Eigen::Vector3d rcm_point = currentRcmPoint();
+    error = rcmError(tip, axis, rcm_point);
+    const double radius = (tip - rcm_point).norm();
     return std::isfinite(error) && std::isfinite(radius) &&
            error <= get_parameter("rcm_tolerance_m").as_double() &&
-           radius >= 0.02 && radius <= 1.0;
+           radius <= 1.0;
   }
 
   bool validateTrajectory(
@@ -276,6 +323,102 @@ private:
     return true;
   }
 
+  void onPerceptionScene(
+    const rm_ros_interfaces::msg::PerceptionScene::ConstSharedPtr & scene)
+  {
+    if (!move_group_ || !planning_scene_interface_) {
+      return;
+    }
+    if (!scene->valid || !scene->transform_valid || !scene->obstacles_valid ||
+      scene->header.frame_id != move_group_->getPlanningFrame())
+    {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 3000,
+        "未同步感知障碍物：scene_valid=%d transform_valid=%d obstacles_valid=%d frame=%s planning_frame=%s",
+        scene->valid, scene->transform_valid, scene->obstacles_valid,
+        scene->header.frame_id.c_str(), move_group_->getPlanningFrame().c_str());
+      return;
+    }
+
+    std::map<std::string, std::array<double, 6>> current_bounds;
+    std::vector<moveit_msgs::msg::CollisionObject> updates;
+    for (const auto & item : scene->objects) {
+      if (!item.detected || item.class_name == "liver" || item.class_name == "lesion") {
+        continue;
+      }
+      if (!item.obstacle_geometry_valid) {
+        return;
+      }
+      const auto & lo = item.obstacle_bounds_min_world;
+      const auto & hi = item.obstacle_bounds_max_world;
+      const std::array<double, 6> bounds{lo.x, lo.y, lo.z, hi.x, hi.y, hi.z};
+      if (!std::all_of(bounds.begin(), bounds.end(), [](double value) {
+          return std::isfinite(value);
+        }) || hi.x <= lo.x || hi.y <= lo.y || hi.z <= lo.z)
+      {
+        return;
+      }
+
+      const std::string id = "perception_" + item.class_name;
+      current_bounds[id] = bounds;
+      const auto previous = perception_obstacle_bounds_.find(id);
+      const double threshold = get_parameter("obstacle_scene_update_threshold_m").as_double();
+      if (!std::isfinite(threshold) || threshold <= 0.0) {
+        RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 3000,
+          "obstacle_scene_update_threshold_m 必须为正有限值");
+        return;
+      }
+      bool changed = previous == perception_obstacle_bounds_.end();
+      if (!changed) {
+        for (std::size_t i = 0; i < bounds.size(); ++i) {
+          if (std::abs(bounds[i] - previous->second[i]) >= threshold) {
+            changed = true;
+            break;
+          }
+        }
+      }
+      if (!changed) {
+        continue;
+      }
+
+      moveit_msgs::msg::CollisionObject object;
+      object.header = scene->header;
+      object.id = id;
+      object.operation = moveit_msgs::msg::CollisionObject::ADD;
+      shape_msgs::msg::SolidPrimitive box;
+      box.type = shape_msgs::msg::SolidPrimitive::BOX;
+      box.dimensions = {hi.x - lo.x, hi.y - lo.y, hi.z - lo.z};
+      geometry_msgs::msg::Pose pose;
+      pose.position.x = 0.5 * (lo.x + hi.x);
+      pose.position.y = 0.5 * (lo.y + hi.y);
+      pose.position.z = 0.5 * (lo.z + hi.z);
+      pose.orientation.w = 1.0;
+      object.primitives.push_back(box);
+      object.primitive_poses.push_back(pose);
+      updates.push_back(std::move(object));
+    }
+
+    for (const auto & previous : perception_obstacle_bounds_) {
+      if (current_bounds.count(previous.first) != 0) {
+        continue;
+      }
+      moveit_msgs::msg::CollisionObject object;
+      object.header = scene->header;
+      object.id = previous.first;
+      object.operation = moveit_msgs::msg::CollisionObject::REMOVE;
+      updates.push_back(std::move(object));
+    }
+
+    if (!updates.empty() && !planning_scene_interface_->applyCollisionObjects(updates)) {
+      RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 3000,
+        "MoveIt 拒绝更新感知障碍物场景");
+      return;
+    }
+    perception_obstacle_bounds_ = std::move(current_bounds);
+    std_msgs::msg::UInt64 synced_revision;
+    synced_revision.data = scene->obstacle_geometry_revision;
+    collision_scene_synced_pub_->publish(synced_revision);
+  }
+
   void initializeInteractiveTarget(const geometry_msgs::msg::Pose & pose)
   {
     interactive_server_ = std::make_shared<interactive_markers::InteractiveMarkerServer>(
@@ -285,7 +428,7 @@ private:
     marker.header.frame_id = move_group_->getPlanningFrame();
     marker.pose = pose;
     marker.name = "rcm_constrained_tip_goal";
-    marker.description = "RCM 目标：绿色箭头沿器具轴线插入/退出；拖动绿色球可倾转；松开后保持器具轴线穿过远心点";
+    marker.description = "RCM 目标：绿色箭头沿器具轴线插入/退出；拖动绿色球可倾转；拖动工具周围的旋转环可绕第六轴滚转";
     marker.scale = 0.12;
 
     visualization_msgs::msg::InteractiveMarkerControl visual_control;
@@ -314,11 +457,11 @@ private:
       marker, "move_tool_axis",
       Eigen::Quaterniond(Eigen::AngleAxisd(-kPi / 2.0, Eigen::Vector3d::UnitY())),
       0.1, 0.72, 0.18, true);
+    addToolRollControl(marker);
 
     interactive_server_->insert(
       marker,
-      [this](const auto & feedback) {onInteractiveFeedback(feedback);},
-      visualization_msgs::msg::InteractiveMarkerFeedback::MOUSE_UP);
+      [this](const auto & feedback) {onInteractiveFeedback(feedback);});
     interactive_server_->applyChanges();
     RCLCPP_INFO(get_logger(),
       "RCM 交互目标已就绪：拖动尖端目标并松开，节点会沿器具轴线穿过远心点生成路径并执行");
@@ -359,19 +502,66 @@ private:
     marker.controls.push_back(control);
   }
 
+  static void addToolRollControl(visualization_msgs::msg::InteractiveMarker & marker)
+  {
+    visualization_msgs::msg::InteractiveMarkerControl control;
+    control.name = "roll_tool_axis";
+    // ROTATE_AXIS uses the control frame's local X axis. Align it with tool +Z.
+    const Eigen::Quaterniond control_orientation(
+      Eigen::AngleAxisd(-kPi / 2.0, Eigen::Vector3d::UnitY()));
+    control.orientation.x = control_orientation.x();
+    control.orientation.y = control_orientation.y();
+    control.orientation.z = control_orientation.z();
+    control.orientation.w = control_orientation.w();
+    control.orientation_mode = visualization_msgs::msg::InteractiveMarkerControl::INHERIT;
+    control.interaction_mode = visualization_msgs::msg::InteractiveMarkerControl::ROTATE_AXIS;
+    control.always_visible = true;
+
+    visualization_msgs::msg::Marker ring;
+    ring.type = visualization_msgs::msg::Marker::LINE_STRIP;
+    ring.action = visualization_msgs::msg::Marker::ADD;
+    ring.scale.x = 0.004;
+    ring.color.r = 0.25;
+    ring.color.g = 0.82;
+    ring.color.b = 1.0;
+    ring.color.a = 0.95;
+    constexpr int segments = 64;
+    constexpr double radius = 0.085;
+    for (int i = 0; i <= segments; ++i) {
+      const double angle = 2.0 * kPi * static_cast<double>(i) / segments;
+      geometry_msgs::msg::Point point;
+      point.y = radius * std::cos(angle);
+      point.z = radius * std::sin(angle);
+      ring.points.push_back(point);
+    }
+    control.markers.push_back(ring);
+    marker.controls.push_back(control);
+  }
+
   void onInteractiveFeedback(
     const visualization_msgs::msg::InteractiveMarkerFeedback::ConstSharedPtr & feedback)
   {
+    if (feedback->event_type == visualization_msgs::msg::InteractiveMarkerFeedback::MOUSE_DOWN) {
+      RCLCPP_INFO(get_logger(), "RViz 选中 RCM 控件：%s", feedback->control_name.c_str());
+      return;
+    }
+    if (feedback->event_type == visualization_msgs::msg::InteractiveMarkerFeedback::POSE_UPDATE) {
+      RCLCPP_DEBUG(get_logger(), "RViz 正在拖动 RCM 控件：%s", feedback->control_name.c_str());
+      return;
+    }
     if (feedback->event_type != visualization_msgs::msg::InteractiveMarkerFeedback::MOUSE_UP) {
       return;
     }
-    RCLCPP_INFO(get_logger(), "收到 RCM 交互目标释放事件，开始生成约束路径");
+    const std::string planning_frame = move_group_->getPlanningFrame();
+    RCLCPP_INFO(get_logger(),
+      "收到 RCM 交互目标释放事件（control=%s, feedback_frame=%s, planning_frame=%s），开始生成约束路径",
+      feedback->control_name.c_str(), feedback->header.frame_id.c_str(), planning_frame.c_str());
 
     const Eigen::Vector3d dragged_tip(
       feedback->pose.position.x,
       feedback->pose.position.y,
       feedback->pose.position.z);
-    const Eigen::Vector3d from_rcm = dragged_tip - rcm_point_;
+    const Eigen::Vector3d from_rcm = dragged_tip - currentRcmPoint();
     if (from_rcm.norm() < 1e-6) {
       RCLCPP_WARN(get_logger(), "拖动目标与远心点重合，无法确定器具方向");
       return;
@@ -384,9 +574,16 @@ private:
     goal.position.z = constrained_tip.z();
     goal.orientation = feedback->pose.orientation;
     if (interactive_server_) {
-      interactive_server_->setPose(feedback->marker_name, goal, feedback->header);
+      auto marker_header = feedback->header;
+      marker_header.frame_id = planning_frame;
+      interactive_server_->setPose(feedback->marker_name, goal, marker_header);
       interactive_server_->applyChanges();
     }
+    const Eigen::Quaterniond constrained_orientation(
+      goal.orientation.w, goal.orientation.x,
+      goal.orientation.y, goal.orientation.z);
+    const bool preserve_goal_roll =
+      feedback->control_name == "roll_tool_axis" || feedback->control_name == "web_teleop";
 
     bool expected = false;
     if (!motion_active_.compare_exchange_strong(expected, true)) {
@@ -397,10 +594,10 @@ private:
     if (motion_thread_.joinable()) {
       motion_thread_.join();
     }
-    motion_thread_ = std::thread([this, constrained_tip]() {
+    motion_thread_ = std::thread([this, constrained_tip, constrained_orientation, preserve_goal_roll]() {
         bool success = false;
         try {
-          success = moveToRcmTarget(constrained_tip);
+          success = moveToRcmTarget(constrained_tip, constrained_orientation, preserve_goal_roll);
         } catch (const std::exception & exception) {
           RCLCPP_ERROR(get_logger(), "RCM 交互运动异常：%s", exception.what());
         }
@@ -428,8 +625,11 @@ private:
     onInteractiveFeedback(feedback);
   }
 
-  bool moveToRcmTarget(const Eigen::Vector3d & target_tip)
+  bool moveToRcmTarget(
+    const Eigen::Vector3d & target_tip, Eigen::Quaterniond goal_orientation,
+    bool preserve_goal_roll)
   {
+    const Eigen::Vector3d rcm_point = currentRcmPoint();
     geometry_msgs::msg::PoseStamped current = move_group_->getCurrentPose(end_effector_link_);
     double current_rcm_error = 0.0;
     if (!isPoseConsistentWithRcm(current, current_rcm_error)) {
@@ -452,25 +652,43 @@ private:
       return false;
     }
     start_orientation.normalize();
+    if (!std::isfinite(goal_orientation.norm()) || goal_orientation.norm() < 1e-9) {
+      RCLCPP_ERROR(get_logger(), "RCM 目标末端姿态无效");
+      return false;
+    }
+    goal_orientation.normalize();
     const Eigen::Vector3d start_axis = start_orientation * Eigen::Vector3d::UnitZ();
-    const Eigen::Vector3d start_from_rcm = start_tip - rcm_point_;
+    const Eigen::Vector3d start_from_rcm = start_tip - rcm_point;
     const double start_radius = start_from_rcm.norm();
-    const Eigen::Vector3d goal_from_rcm = target_tip - rcm_point_;
+    const Eigen::Vector3d goal_from_rcm = target_tip - rcm_point;
     double goal_radius = goal_from_rcm.norm();
-    if (!std::isfinite(goal_radius) || goal_radius < 0.02 || goal_radius > 1.0) {
+    const bool initializing = start_radius < 0.02;
+    if (!std::isfinite(goal_radius) || goal_radius < 1e-4 || goal_radius > 1.0) {
       RCLCPP_WARN(get_logger(),
-        "目标尖端到 RCM 的距离 %.3f m 超出允许范围 0.02–1.0 m，不执行", goal_radius);
+        "目标尖端到 RCM 的距离 %.3f m 超出允许范围 (0, 1.0] m，不执行", goal_radius);
       return false;
     }
     Eigen::Vector3d goal_axis = goal_from_rcm / goal_radius;
     double axis_angle = std::acos(std::clamp(start_axis.dot(goal_axis), -1.0, 1.0));
+    if (initializing) {
+      const double orientation_change = start_orientation.angularDistance(goal_orientation);
+      if (axis_angle > 0.1 * kPi / 180.0 ||
+        orientation_change > 0.1 * kPi / 180.0)
+      {
+        RCLCPP_WARN(get_logger(),
+          "尖端距 RCM 不足 20 mm，初始化阶段只允许沿器具轴线进退；倾转和第六轴滚转已锁定");
+        return false;
+      }
+      goal_axis = start_axis;
+    }
     // Treat only near-zero angular changes as insertion/retraction. The web
     // joystick sends 2-degree tilt steps, so a wider threshold misclassifies
     // every joystick command as axial motion and suppresses the tilt.
-    const bool axial_motion = axis_angle < 0.5 * kPi / 180.0;
+    const bool axial_motion = initializing || axis_angle < 0.5 * kPi / 180.0;
     if (axial_motion) {
       goal_radius = goal_from_rcm.dot(start_axis);
-      if (goal_radius < 0.02 || goal_radius > 1.0) {
+      const double min_radius = initializing ? 1e-4 : 0.02;
+      if (goal_radius < min_radius || goal_radius > 1.0) {
         RCLCPP_WARN(get_logger(), "轴向目标投影距离 %.3f m 超出允许范围，不执行", goal_radius);
         return false;
       }
@@ -485,18 +703,24 @@ private:
       RCLCPP_ERROR(get_logger(), "RCM 单次运动限幅参数必须是非负有限值");
       return false;
     }
-    const double insertion_delta = std::abs(goal_radius - start_radius);
+    double insertion_delta = std::abs(goal_radius - start_radius);
+    constexpr double insertion_limit_tolerance_m = 1e-6;
     if (max_rotation > 0.0 && axis_angle > max_rotation * kPi / 180.0) {
       RCLCPP_WARN(get_logger(),
         "RCM 倾转目标 %.2f 度超过单次限幅 %.2f 度，不执行；请在 RViz 中减小拖动量",
         axis_angle * 180.0 / kPi, max_rotation);
       return false;
     }
-    if (max_insertion > 0.0 && insertion_delta > max_insertion) {
-      RCLCPP_WARN(get_logger(),
-        "RCM 轴向目标变化 %.1f mm 超过单次限幅 %.1f mm，不执行；请在 RViz 中减小拖动量",
-        insertion_delta * 1000.0, max_insertion * 1000.0);
-      return false;
+    if (max_insertion > 0.0 &&
+      insertion_delta > max_insertion + insertion_limit_tolerance_m)
+    {
+      const double direction = goal_radius >= start_radius ? 1.0 : -1.0;
+      const double requested_delta = insertion_delta;
+      goal_radius = start_radius + direction * max_insertion;
+      insertion_delta = max_insertion;
+      RCLCPP_INFO(get_logger(),
+        "RCM 轴向目标变化 %.3f mm 超过单次限幅 %.3f mm，已自动裁剪到限幅内",
+        requested_delta * 1000.0, max_insertion * 1000.0);
     }
     RCLCPP_INFO(get_logger(),
       "RCM 轴向行程：当前尖端距远心点 %.3f m，目标 %.3f m，变化 %.3f m；轴向夹角 %.1f 度",
@@ -532,6 +756,24 @@ private:
         route.push_back(goal_axis);
       }
 
+      Eigen::Quaterniond route_end_orientation = start_orientation;
+      Eigen::Vector3d route_start_axis = start_axis;
+      for (const Eigen::Vector3d & route_axis : route) {
+        Eigen::Quaterniond route_rotation = Eigen::Quaterniond::FromTwoVectors(
+          route_start_axis, route_axis);
+        route_rotation.normalize();
+        route_end_orientation = route_rotation * route_end_orientation;
+        route_end_orientation.normalize();
+        route_start_axis = route_axis;
+      }
+      Eigen::Quaterniond roll_residual = preserve_goal_roll ?
+        route_end_orientation.inverse() * goal_orientation : Eigen::Quaterniond::Identity();
+      roll_residual.normalize();
+      if (roll_residual.w() < 0.0) {
+        roll_residual.coeffs() *= -1.0;
+      }
+      const double roll_angle = Eigen::AngleAxisd(roll_residual).angle();
+
       std::vector<geometry_msgs::msg::Pose> waypoints;
       std::vector<geometry_msgs::msg::Point> candidate_tip_path;
       candidate_tip_path.push_back(current.pose.position);
@@ -560,9 +802,11 @@ private:
           (goal_radius - start_radius) * segment_start_fraction;
         const double segment_radius_end = start_radius +
           (goal_radius - start_radius) * segment_end_fraction;
+        const double segment_roll_angle = roll_angle *
+          (segment_end_fraction - segment_start_fraction);
         const int steps = std::max(
           2, static_cast<int>(std::ceil(std::max(
-          std::max(angle / (3.0 * kPi / 180.0),
+          std::max((angle + segment_roll_angle) / (3.0 * kPi / 180.0),
           std::max(segment_radius_start, segment_radius_end) * angle / eef_step),
           std::abs(segment_radius_end - segment_radius_start) / eef_step))));
         for (int i = 1; i <= steps; ++i) {
@@ -570,12 +814,16 @@ private:
           Eigen::Quaterniond orientation =
             Eigen::Quaterniond::Identity().slerp(fraction, rotation) *
             segment_start_orientation;
+          const double roll_fraction = segment_start_fraction +
+            (segment_end_fraction - segment_start_fraction) * fraction;
+          orientation *= Eigen::Quaterniond::Identity().slerp(
+            roll_fraction, roll_residual);
           orientation.normalize();
           const Eigen::Vector3d axis = orientation * Eigen::Vector3d::UnitZ();
           const double path_fraction = segment_start_fraction +
             (segment_end_fraction - segment_start_fraction) * fraction;
           const double radius = start_radius + (goal_radius - start_radius) * path_fraction;
-          const Eigen::Vector3d tip = rcm_point_ + radius * axis;
+          const Eigen::Vector3d tip = rcm_point + radius * axis;
 
           geometry_msgs::msg::Pose pose;
           pose.position.x = tip.x();
@@ -613,7 +861,7 @@ private:
       }
 
       double candidate_max_error = 0.0;
-      if (!validateTrajectory(candidate_trajectory, rcm_point_, candidate_max_error)) {
+      if (!validateTrajectory(candidate_trajectory, rcm_point, candidate_max_error)) {
         continue;
       }
       trajectory = std::move(candidate_trajectory);
@@ -650,8 +898,7 @@ private:
       return false;
     }
 
-    publishPathMarkers(rcm_point_, tip_path);
-    resetInteractiveTargetToCurrentPose();
+    publishPathMarkers(rcm_point, tip_path);
     if (partial_axial_path) {
       RCLCPP_WARN(get_logger(),
         "轴向路径的可达部分已执行（%.1f%%），机械臂停在当前可达位置；最大 RCM 偏差 %.3f mm",
@@ -676,7 +923,9 @@ private:
         current_rcm_error * 1000.0);
       return;
     }
-    interactive_server_->setPose("rcm_constrained_tip_goal", current.pose, current.header);
+    auto marker_header = current.header;
+    marker_header.frame_id = move_group_->getPlanningFrame();
+    interactive_server_->setPose("rcm_constrained_tip_goal", current.pose, marker_header);
     interactive_server_->applyChanges();
   }
 
@@ -772,22 +1021,14 @@ private:
       return;
     }
     auto pose = move_group_->getCurrentPose(end_effector_link_);
-    double current_rcm_error = 0.0;
-    if (isPoseConsistentWithRcm(pose, current_rcm_error)) {
-      current_pose_pub_->publish(pose);
-    } else {
-      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
-        "未发布无效尖端状态（frame=%s，位置=[%.3f, %.3f, %.3f] m，"
-        "RCM 轴线偏差=%.3f mm）；Web 遥控器将等待有效状态",
-        pose.header.frame_id.c_str(), pose.pose.position.x,
-        pose.pose.position.y, pose.pose.position.z, current_rcm_error * 1000.0);
-    }
+    current_pose_pub_->publish(pose);
     geometry_msgs::msg::PointStamped rcm;
     rcm.header.frame_id = move_group_->getPlanningFrame();
     rcm.header.stamp = now();
-    rcm.point.x = rcm_point_.x();
-    rcm.point.y = rcm_point_.y();
-    rcm.point.z = rcm_point_.z();
+    const Eigen::Vector3d rcm_point = currentRcmPoint();
+    rcm.point.x = rcm_point.x();
+    rcm.point.y = rcm_point.y();
+    rcm.point.z = rcm_point.z();
     rcm_point_pub_->publish(rcm);
   }
 
@@ -798,18 +1039,88 @@ private:
     motion_busy_pub_->publish(message);
   }
 
+  void onSetRcmPoint(const geometry_msgs::msg::PointStamped::ConstSharedPtr & message)
+  {
+    std_msgs::msg::Bool result;
+    result.data = false;
+    if (motion_active_.load()) {
+      RCLCPP_WARN(get_logger(), "拒绝更新 RCM：当前仍有约束运动执行");
+    } else if (message->header.frame_id != move_group_->getPlanningFrame()) {
+      RCLCPP_WARN(get_logger(), "拒绝更新 RCM：坐标系 %s 与规划坐标系 %s 不一致",
+        message->header.frame_id.c_str(), move_group_->getPlanningFrame().c_str());
+    } else {
+      const Eigen::Vector3d point(message->point.x, message->point.y, message->point.z);
+      const auto current_state = move_group_->getCurrentState(2.0);
+      if (!current_state) {
+        RCLCPP_WARN(get_logger(), "拒绝更新 RCM：等待最新关节状态超时，未使用过期位姿");
+      } else if (point.allFinite()) {
+        const Eigen::Isometry3d & tip_transform =
+          current_state->getGlobalLinkTransform(end_effector_link_);
+        const Eigen::Vector3d tip = tip_transform.translation();
+        Eigen::Quaterniond orientation(tip_transform.linear());
+        orientation.normalize();
+        const Eigen::Vector3d axis = orientation * Eigen::Vector3d::UnitZ();
+        const double error = rcmError(tip, axis, point);
+        const double radius = (tip - point).norm();
+        const double tolerance = std::min(0.005, get_parameter("rcm_tolerance_m").as_double());
+        if (std::isfinite(error) && radius <= 1.0 && error <= tolerance) {
+          {
+            std::lock_guard<std::mutex> lock(rcm_mutex_);
+            rcm_point_ = point;
+          }
+          set_parameter(rclcpp::Parameter("derive_rcm_from_current", false));
+          set_parameter(rclcpp::Parameter("rcm_x", point.x()));
+          set_parameter(rclcpp::Parameter("rcm_y", point.y()));
+          set_parameter(rclcpp::Parameter("rcm_z", point.z()));
+          geometry_msgs::msg::Pose current_pose;
+          current_pose.position.x = tip.x();
+          current_pose.position.y = tip.y();
+          current_pose.position.z = tip.z();
+          current_pose.orientation.x = orientation.x();
+          current_pose.orientation.y = orientation.y();
+          current_pose.orientation.z = orientation.z();
+          current_pose.orientation.w = orientation.w();
+          publishPathMarkers(point, {current_pose.position});
+          std_msgs::msg::Header marker_header;
+          marker_header.frame_id = move_group_->getPlanningFrame();
+          marker_header.stamp = now();
+          interactive_server_->setPose("rcm_constrained_tip_goal", current_pose, marker_header);
+          interactive_server_->applyChanges();
+          result.data = true;
+          RCLCPP_INFO(get_logger(),
+            "RCM 标定点已应用：[%.4f, %.4f, %.4f] m，尖端距离 %.3f m，轴线偏差 %.2f mm",
+            point.x(), point.y(), point.z(), radius, error * 1000.0);
+        } else {
+          RCLCPP_WARN(get_logger(),
+            "拒绝更新 RCM：当前尖端距离 %.3f m（需不超过 1.0 m），轴线偏差 %.2f mm（限值 %.2f mm）",
+            radius, error * 1000.0, tolerance * 1000.0);
+        }
+      }
+    }
+    set_rcm_result_pub_->publish(result);
+  }
+
   std::string end_effector_link_;
   std::shared_ptr<moveit::planning_interface::MoveGroupInterface> move_group_;
+  std::unique_ptr<moveit::planning_interface::PlanningSceneInterface> planning_scene_interface_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr current_pose_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr rcm_point_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr motion_busy_pub_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr set_rcm_result_pub_;
+  rclcpp::Publisher<std_msgs::msg::UInt64>::SharedPtr collision_scene_synced_pub_;
+  rclcpp::CallbackGroup::SharedPtr set_rcm_point_callback_group_;
+  rclcpp::CallbackGroup::SharedPtr perception_scene_callback_group_;
   rclcpp::TimerBase::SharedPtr marker_timer_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr web_target_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr set_rcm_point_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr stop_sub_;
+  rclcpp::Subscription<rm_ros_interfaces::msg::PerceptionScene>::SharedPtr perception_scene_sub_;
   std::shared_ptr<interactive_markers::InteractiveMarkerServer> interactive_server_;
   visualization_msgs::msg::MarkerArray markers_;
   std::mutex markers_mutex_;
+  std::map<std::string, std::array<double, 6>> perception_obstacle_bounds_;
+  mutable std::mutex rcm_mutex_;
   std::atomic<bool> motion_active_{false};
   std::thread motion_thread_;
   std::thread state_thread_;
@@ -826,7 +1137,7 @@ int main(int argc, char * argv[])
   options.automatically_declare_parameters_from_overrides(true);
 
   auto node = std::make_shared<Rm65RcmDemo>(options);
-  rclcpp::executors::SingleThreadedExecutor executor;
+  rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(), 2);
   executor.add_node(node);
   std::thread spinner([&executor]() {executor.spin();});
   rclcpp::sleep_for(std::chrono::milliseconds(500));

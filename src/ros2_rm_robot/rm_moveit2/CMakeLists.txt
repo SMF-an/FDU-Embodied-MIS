@@ -11,6 +11,8 @@ find_package(interactive_markers REQUIRED)
 find_package(moveit_ros_planning_interface REQUIRED)
 find_package(moveit_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rm_ros_interfaces REQUIRED)
+find_package(shape_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 
@@ -35,6 +37,8 @@ ament_target_dependencies(
   moveit_ros_planning_interface
   interactive_markers
   rclcpp
+  rm_ros_interfaces
+  shape_msgs
   std_msgs
   visualization_msgs
 )

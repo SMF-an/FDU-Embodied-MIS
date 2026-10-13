@@ -9,6 +9,12 @@
         link6_type:=$(arg link6_type)
     </xacro:include>
 
+    <link name="world"/>
+    <joint name="world_to_base" type="fixed">
+        <parent link="world"/>
+        <child link="base_link"/>
+    </joint>
+
     <!-- Import control_xacro -->
     <xacro:include filename="rm_65_description.ros2_control.xacro" />
 

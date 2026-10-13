@@ -1,14 +1,23 @@
+import os
+
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from ament_index_python.packages import get_package_share_directory
 
 
 def generate_launch_description():
+    package_share = get_package_share_directory("rm_rcm_web_teleop")
+    workspace_root = os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(package_share)))
+    )
+    default_data_directory = os.path.join(workspace_root, "data")
     return LaunchDescription(
         [
             DeclareLaunchArgument("host", default_value="127.0.0.1"),
             DeclareLaunchArgument("port", default_value="8765"),
+            DeclareLaunchArgument("data_directory", default_value=default_data_directory),
             DeclareLaunchArgument(
                 "camera_topic", default_value="/camera/camera/color/image_raw"
             ),
@@ -23,8 +32,11 @@ def generate_launch_description():
                         "host": LaunchConfiguration("host"),
                         "port": LaunchConfiguration("port"),
                         "camera_topic": LaunchConfiguration("camera_topic"),
+                        "data_directory": LaunchConfiguration("data_directory"),
                         "step_angle_deg": 2.0,
-                        "step_insertion_m": 0.002,
+                        "step_roll_deg": 2.0,
+                        "step_insertion_m": 0.005,
+                        "large_step_multiplier": 2.0,
                     }
                 ],
             ),

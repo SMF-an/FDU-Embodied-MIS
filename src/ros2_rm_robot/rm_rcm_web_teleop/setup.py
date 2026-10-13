@@ -14,6 +14,7 @@ setup(
         (f"share/{package_name}", ["package.xml"]),
         (os.path.join("share", package_name, "launch"), glob("launch/*.launch.py")),
         (os.path.join("share", package_name, "web"), glob("web/*")),
+        (os.path.join("share", package_name, "config"), glob("config/*.yaml")),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
@@ -25,6 +26,9 @@ setup(
         "console_scripts": [
             "rcm_web_teleop = rm_rcm_web_teleop.server:main",
             "dual_rcm_web_teleop = rm_rcm_web_teleop.dual_server:main",
+            "dual_rcm_calibrate = rm_rcm_web_teleop.rcm_calibrate:main",
+            "robot_checkerboard_calibrate = rm_rcm_web_teleop.checkerboard_calibrate:main",
+            "rcm_teaching_playback = rm_rcm_web_teleop.teaching_playback:main",
         ],
     },
 )

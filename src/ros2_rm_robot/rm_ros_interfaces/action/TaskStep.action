@@ -1,0 +1,12 @@
+uint8 task_id
+string step
+string[] arms
+string target_class
+float32 approach_offset_m
+rm_ros_interfaces/PerceptionScene scene
+---
+bool success
+string message
+---
+string phase
+float32 progress

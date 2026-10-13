@@ -222,8 +222,11 @@ static int Configure_Surgical_Tool_TCP()
     }
 
     RCLCPP_INFO(rclcpp::get_logger("rm_driver"),
-        "Surgical TCP '%s' selected and verified: flange offset z=%.3f m, payload=%.3f kg, COM z=%.1f mm",
-        tool_tcp_frame_name.c_str(), tool_tcp_offset_z_m, tool_payload_kg, tool_com_z_m * 1000.0);
+        "Surgical TCP '%s' selected and verified: flange offset z=%.3f m, payload=%.3f kg; "
+        "requested COM z=%.1f mm, controller read-back COM=(%.3f, %.3f, %.3f) mm, payload=%.3f kg",
+        tool_tcp_frame_name.c_str(), tool_tcp_offset_z_m, tool_payload_kg,
+        tool_com_z_m * 1000.0, active_tool_frame.x, active_tool_frame.y,
+        active_tool_frame.z, active_tool_frame.payload);
     return 0;
 }
 
@@ -910,6 +913,28 @@ void RmArm::Set_Stop_Teach_Callback(const std_msgs::msg::Empty::SharedPtr msg)
         stop_teach_result.data = false;
         this->Set_Stop_Teach_Cmd_Result->publish(stop_teach_result);
         RCLCPP_INFO (this->get_logger(),"Stop_Teach error code is %d\n",stop_teach_data.data);
+    }
+}
+
+void RmArm::Start_Drag_Teach_Callback(const std_msgs::msg::Empty::SharedPtr)
+{
+    const int32_t result = rm_start_drag_teach(robot_handle, 0);
+    std_msgs::msg::Bool response;
+    response.data = result == 0;
+    Start_Drag_Teach_Cmd_Result->publish(response);
+    if (!response.data) {
+        RCLCPP_ERROR(get_logger(), "Start drag teach failed with code %d", result);
+    }
+}
+
+void RmArm::Stop_Drag_Teach_Callback(const std_msgs::msg::Empty::SharedPtr)
+{
+    const int32_t result = rm_stop_drag_teach(robot_handle);
+    std_msgs::msg::Bool response;
+    response.data = result == 0;
+    Stop_Drag_Teach_Cmd_Result->publish(response);
+    if (!response.data) {
+        RCLCPP_ERROR(get_logger(), "Stop drag teach failed with code %d", result);
     }
 }
 
@@ -4584,6 +4609,12 @@ RmArm::RmArm():
     Set_Stop_Teach_Cmd = this->create_subscription<std_msgs::msg::Empty>("rm_driver/set_stop_teach_cmd",rclcpp::ParametersQoS(),
         std::bind(&RmArm::Set_Stop_Teach_Callback,this,std::placeholders::_1),
         sub_opt2);
+    Start_Drag_Teach_Cmd_Result = this->create_publisher<std_msgs::msg::Bool>("rm_driver/start_drag_teach_result", rclcpp::ParametersQoS());
+    Start_Drag_Teach_Cmd = this->create_subscription<std_msgs::msg::Empty>("rm_driver/start_drag_teach_cmd", rclcpp::ParametersQoS(),
+        std::bind(&RmArm::Start_Drag_Teach_Callback, this, std::placeholders::_1), sub_opt2);
+    Stop_Drag_Teach_Cmd_Result = this->create_publisher<std_msgs::msg::Bool>("rm_driver/stop_drag_teach_result", rclcpp::ParametersQoS());
+    Stop_Drag_Teach_Cmd = this->create_subscription<std_msgs::msg::Empty>("rm_driver/stop_drag_teach_cmd", rclcpp::ParametersQoS(),
+        std::bind(&RmArm::Stop_Drag_Teach_Callback, this, std::placeholders::_1), sub_opt2);
 /******************************************************************************end*****************************************************************/
 
 /******************************************************************************四代控制器新增*****************************************************************/

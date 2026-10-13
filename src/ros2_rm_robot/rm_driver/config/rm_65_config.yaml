@@ -1,20 +1,20 @@
 rm_driver:
   ros__parameters:
     #robot param
-    arm_ip: "192.168.1.19"        #设置TCP连接时的IP
+    arm_ip: "192.168.1.18"        #设置TCP连接时的IP
     tcp_port: 8080                #设置TCP连接时的端口
     
     arm_type: "RM_65"             #机械臂型号设置       
     arm_dof: 6                    #机械臂自由度设置
     tool_tcp_enable: true         # 启动时在控制器配置并启用器具尖端 TCP
     tool_tcp_frame_name: "MIS_TOOL25"
-    tool_tcp_offset_z_m: 0.25     # 法兰局部 +Z 方向偏移，单位 m
+    tool_tcp_offset_z_m: 0.492     # 法兰局部 +Z 方向偏移，单位 m
     tool_payload_kg: 0.05         # 简化器具质量，单位 kg
-    tool_com_z_m: 0.125           # 质心相对法兰位置，单位 m
+    tool_com_z_m: 0.000125           # 配置单位 m；写入控制器 rm_frame_t.z 后按 mm 存储/显示（此值为 125 mm）
 
-    udp_ip: "192.168.1.100"       #设置udp主动上报IP
+    udp_ip: "192.168.1.101"       #设置udp主动上报IP
     udp_cycle: 5                  #udp主动上报周期，需要是5的倍数。
-    udp_port: 8089                #设置udp主动上报端口
+    udp_port: 8090                #设置udp主动上报端口
     udp_force_coordinate: 0       #设置系统受力时六维力的基准坐标，0为传感器坐标系 1为当前工作坐标系 2为当前工具坐标系
     udp_hand: false               #设置灵巧手udp主动上报使能
     udp_plus_base: false          #设置末端设备基础信息udp主动上报使能
