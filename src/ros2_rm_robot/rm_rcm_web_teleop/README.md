@@ -63,7 +63,7 @@ Points are saved in meters in the `world` frame to `data/calibration/dual_rcm_po
 
 ## Teaching and Playback
 
-Use **Start Recording** and **Stop and Save** in the dual-arm page to save accepted target poses and timing to `data/teachings/`. This does not record video or raw joystick input. The camera's separate **Record** button downloads the RGB view as a timestamped `.webm` file; it requires browser support for `MediaRecorder` and Canvas `captureStream`.
+Use **Start Recording** and **Stop and Save** in the dual-arm page to save accepted target poses, current joint states, and timing to `data/teachings/`. This does not record video or raw joystick input. The camera's separate **Record** button downloads the RGB view as a timestamped `.webm` file; it requires browser support for `MediaRecorder` and Canvas `captureStream`.
 
 Before playback, place both arms in the same safe starting state used for recording, clear the workspace, and keep the hardware emergency stop ready:
 
@@ -72,4 +72,6 @@ ros2 run rm_rcm_web_teleop rcm_teaching_playback --ros-args \
   -p file:=/path/to/data/teachings/dual_rcm_<timestamp>.json
 ```
 
-Playback sends one target at a time and waits for completion. `speed` changes only the delays between actions; it does not change robot motion speed. Available parameters include `speed` (default `1.0`), `busy_timeout_sec` (default `30.0`), and `pause_limit_sec` (default `10.0`). Playback still uses the RCM planner and checks. The web stop button is a software request, not an emergency stop.
+Playback sends one target at a time and waits for completion. `speed` changes only the delays between actions; it does not change robot motion speed. Available parameters include `speed` (default `1.0`), `busy_timeout_sec` (default `30.0`), `start_pose_timeout_sec` (default `120.0`), and `pause_limit_sec` (default `10.0`). Playback still uses the RCM planner and checks. The web stop button is a software request, not an emergency stop.
+
+Teaching files use format `rm_rcm_teaching_v2`. They must contain `start_joints`; playback first restores both arms using the recorded joint angles, preserving the original inverse-kinematics branch. The recorded `start_poses` remain as reference data. Files from the retired `v1` pose-only format are rejected and must be recorded again. All recorded actions after initialization still use the RCM planner and trajectory validation. Keep the workspace clear and the hardware emergency stop ready.

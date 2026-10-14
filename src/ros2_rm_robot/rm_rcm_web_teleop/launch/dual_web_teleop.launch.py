@@ -17,6 +17,8 @@ def generate_launch_description():
         [
             DeclareLaunchArgument("host", default_value="127.0.0.1"),
             DeclareLaunchArgument("port", default_value="8765"),
+            DeclareLaunchArgument("agent_enabled", default_value="false"),
+            DeclareLaunchArgument("agent_max_action_hz", default_value="2.0"),
             DeclareLaunchArgument("data_directory", default_value=default_data_directory),
             DeclareLaunchArgument(
                 "camera_topic", default_value="/camera/camera/color/image_raw"
@@ -31,6 +33,8 @@ def generate_launch_description():
                         "use_sim_time": False,
                         "host": LaunchConfiguration("host"),
                         "port": LaunchConfiguration("port"),
+                        "agent_enabled": LaunchConfiguration("agent_enabled"),
+                        "agent_max_action_hz": LaunchConfiguration("agent_max_action_hz"),
                         "camera_topic": LaunchConfiguration("camera_topic"),
                         "data_directory": LaunchConfiguration("data_directory"),
                         "step_angle_deg": 2.0,

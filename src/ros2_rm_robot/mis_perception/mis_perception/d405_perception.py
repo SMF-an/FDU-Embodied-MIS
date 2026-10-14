@@ -38,6 +38,55 @@ def mask_quality(mask: np.ndarray, valid_depth_ratio: float) -> float:
     return float(np.clip(shape_quality * valid_depth_ratio, 0.0, 1.0))
 
 
+def draw_lesion_annotation(
+    image: np.ndarray,
+    mask: np.ndarray,
+    center_px: tuple[int, int],
+    position_camera: np.ndarray | None,
+) -> None:
+    contours, _ = cv2.findContours(
+        mask.astype(np.uint8) * 255, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
+    )
+    if not contours:
+        return
+
+    cv2.drawContours(image, contours, -1, (255, 255, 255), 4, cv2.LINE_AA)
+    cv2.drawContours(image, contours, -1, (0, 0, 255), 2, cv2.LINE_AA)
+    radius = max(4, int(round(np.sqrt(np.count_nonzero(mask) / np.pi))))
+    cv2.circle(image, center_px, radius, (255, 255, 255), 4, cv2.LINE_AA)
+    cv2.circle(image, center_px, radius, (0, 0, 255), 2, cv2.LINE_AA)
+    cv2.drawMarker(image, center_px, (255, 255, 255), cv2.MARKER_CROSS, 20, 4, cv2.LINE_AA)
+    cv2.drawMarker(image, center_px, (0, 0, 255), cv2.MARKER_CROSS, 20, 2, cv2.LINE_AA)
+
+    x, y, _, _ = cv2.boundingRect(max(contours, key=cv2.contourArea))
+    lines = [f"LESION px=({center_px[0]},{center_px[1]})"]
+    if position_camera is not None:
+        xyz_mm = np.asarray(position_camera, dtype=np.float64) * 1000.0
+        lines.append(f"camera XYZ=({xyz_mm[0]:.0f},{xyz_mm[1]:.0f},{xyz_mm[2]:.0f}) mm")
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scale = 0.55
+    thickness = 2
+    sizes = [cv2.getTextSize(line, font, scale, thickness)[0] for line in lines]
+    text_width = max(size[0] for size in sizes)
+    text_height = sum(size[1] + 7 for size in sizes)
+    image_height, image_width = image.shape[:2]
+    text_x = min(max(4, x), max(4, image_width - text_width - 8))
+    text_y = y - text_height - 8
+    if text_y < 4:
+        text_y = min(image_height - text_height - 4, y + 24)
+    cv2.rectangle(
+        image,
+        (text_x - 4, text_y - 4),
+        (text_x + text_width + 4, text_y + text_height),
+        (0, 0, 0),
+        cv2.FILLED,
+    )
+    baseline = text_y
+    for line, (width, height) in zip(lines, sizes):
+        baseline += height + 5
+        cv2.putText(image, line, (text_x, baseline), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
+
+
 def quaternion_matrix(x: float, y: float, z: float, w: float) -> np.ndarray:
     norm = np.sqrt(x * x + y * y + z * z + w * w)
     if norm < 1e-12:
@@ -232,6 +281,9 @@ class D405PerceptionNode(Node):
             obstacle_bounds = {}
 
             overlay = color.copy()
+            lesion_mask = None
+            lesion_center_px = None
+            lesion_position_camera = None
             colors = {
                 "liver": (40, 80, 220), "kidney": (180, 80, 200),
                 "gallbladder": (40, 220, 40), "bowel": (40, 180, 240),
@@ -252,6 +304,13 @@ class D405PerceptionNode(Node):
                 item.class_name = name
                 item.detected = bool(np.any(mask))
                 item.mask_pixels = int(np.count_nonzero(mask))
+                if name == "lesion" and item.detected:
+                    ys, xs = np.nonzero(mask)
+                    lesion_mask = mask
+                    lesion_center_px = (
+                        int(round(float(np.mean(xs)))),
+                        int(round(float(np.mean(ys)))),
+                    )
                 if item.detected:
                     valid = mask & np.isfinite(depth_m) & (depth_m >= self.min_depth_m) & (depth_m <= self.max_depth_m)
                     valid_count = int(np.count_nonzero(valid))
@@ -272,6 +331,12 @@ class D405PerceptionNode(Node):
                             point_camera = np.median(points_camera, axis=0)
                             self.set_point(item.position_camera, point_camera)
                             item.position_valid = True
+                            if name == "lesion":
+                                lesion_center_px = (
+                                    int(round(point_camera[0] * fx / point_camera[2] + cx)),
+                                    int(round(point_camera[1] * fy / point_camera[2] + cy)),
+                                )
+                                lesion_position_camera = point_camera
                             if t_target_camera is not None:
                                 point_target = t_target_camera[:, :3] @ point_camera + t_target_camera[:, 3]
                                 self.set_point(item.position_world, point_target)
@@ -301,6 +366,10 @@ class D405PerceptionNode(Node):
                         missing_obstacle_geometry.append(name)
                 scene.objects.append(item)
 
+            if lesion_mask is not None and lesion_center_px is not None:
+                draw_lesion_annotation(
+                    overlay, lesion_mask, lesion_center_px, lesion_position_camera
+                )
             scene.obstacles_status = (
                 "ok" if scene.obstacles_valid else
                 "missing world-frame obstacle geometry: " + ", ".join(sorted(set(missing_obstacle_geometry)))

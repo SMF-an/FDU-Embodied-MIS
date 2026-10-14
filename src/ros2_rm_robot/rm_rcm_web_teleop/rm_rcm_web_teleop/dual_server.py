@@ -2,6 +2,7 @@
 import json
 import math
 import os
+import base64
 import threading
 import time
 from datetime import datetime, timezone
@@ -16,6 +17,7 @@ from geometry_msgs.msg import PointStamped, PoseStamped
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image
+from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool
 
 from .server import clamp, multiply_quaternions, normalize_quaternion, rotate_vector
@@ -115,6 +117,8 @@ class DualRcmWebTeleop(Node):
         super().__init__("dual_rcm_web_teleop")
         self.declare_parameter("host", "127.0.0.1")
         self.declare_parameter("port", 8765)
+        self.declare_parameter("agent_enabled", False)
+        self.declare_parameter("agent_max_action_hz", 2.0)
         self.declare_parameter("step_angle_deg", 2.0)
         self.declare_parameter("step_roll_deg", 2.0)
         self.declare_parameter("step_insertion_m", 0.005)
@@ -125,6 +129,11 @@ class DualRcmWebTeleop(Node):
         self.declare_parameter("calibration_file", "")
         self._host = self.get_parameter("host").value
         self._port = int(self.get_parameter("port").value)
+        self._agent_enabled = bool(self.get_parameter("agent_enabled").value)
+        agent_max_action_hz = float(self.get_parameter("agent_max_action_hz").value)
+        if not math.isfinite(agent_max_action_hz) or agent_max_action_hz <= 0.0:
+            raise ValueError("agent_max_action_hz must be positive")
+        self._agent_max_action_period = 1.0 / agent_max_action_hz
         self._step_angle = math.radians(float(self.get_parameter("step_angle_deg").value))
         self._step_roll = math.radians(float(self.get_parameter("step_roll_deg").value))
         self._step_insertion = float(self.get_parameter("step_insertion_m").value)
@@ -157,17 +166,21 @@ class DualRcmWebTeleop(Node):
         self._last_camera_encode = 0.0
         self._poses = {side: None for side in self.SIDES}
         self._pose_received = {side: 0.0 for side in self.SIDES}
+        self._joints = {side: None for side in self.SIDES}
+        self._joint_received = {side: 0.0 for side in self.SIDES}
         self._rcms = {side: None for side in self.SIDES}
         self._rcm_received = {side: 0.0 for side in self.SIDES}
         self._busy = {side: False for side in self.SIDES}
         self._active_arm = None
         self._active_gripper = None
+        self._agent_last_action = 0.0
         self._active_since = 0.0
         self._active_saw_busy = False
         self._teach_recording = False
         self._teach_started = 0.0
         self._teach_actions = []
         self._teach_start_poses = {}
+        self._teach_start_joints = {}
         self._teach_lock = threading.Lock()
         data_directory = self.get_parameter("data_directory").value
         if not data_directory:
@@ -224,6 +237,12 @@ class DualRcmWebTeleop(Node):
                 10,
             )
             self.create_subscription(
+                JointState,
+                f"/{side}_arm/joint_states",
+                lambda msg, arm=side: self._on_joints(arm, msg),
+                10,
+            )
+            self.create_subscription(
                 PointStamped,
                 f"{topic_root}/rcm_point",
                 lambda msg, arm=side: self._on_rcm(arm, msg),
@@ -243,6 +262,11 @@ class DualRcmWebTeleop(Node):
         with self._lock:
             self._poses[side] = message
             self._pose_received[side] = time.monotonic()
+
+    def _on_joints(self, side, message):
+        with self._lock:
+            self._joints[side] = message
+            self._joint_received[side] = time.monotonic()
 
     def _on_rcm(self, side, message):
         with self._lock:
@@ -302,6 +326,82 @@ class DualRcmWebTeleop(Node):
                 "width": self._camera_width,
                 "height": self._camera_height,
             }
+
+    def agent_observation(self):
+        """Return one bounded observation for an external vision agent."""
+        with self._camera_condition:
+            age = time.monotonic() - self._camera_received if self._camera_received else None
+            jpeg = self._camera_jpeg
+            sequence = self._camera_sequence
+        observation = self.state()
+        observation["agent"] = {
+            "enabled": self._agent_enabled,
+            "action_space": {
+                "tilt_x": "[-1,1], one fine RCM tilt step",
+                "tilt_y": "[-1,1], one fine RCM tilt step",
+                "insertion": "[-1,1], one fine insertion step",
+                "roll": "[-1,1], one fine axial roll step",
+                "gripper": ["hold", "open", "close"],
+            },
+            "max_action_hz": 1.0 / self._agent_max_action_period,
+        }
+        observation["image"] = {
+            "available": jpeg is not None and age is not None and age < 2.0,
+            "age_sec": age,
+            "sequence": sequence,
+            "mime_type": "image/jpeg",
+            "base64": base64.b64encode(jpeg).decode("ascii") if jpeg else None,
+        }
+        return observation
+
+    def agent_action(self, body):
+        if not self._agent_enabled:
+            return 403, {"accepted": False, "error": "agent control is disabled"}
+        now = time.monotonic()
+        if now - self._agent_last_action < self._agent_max_action_period:
+            return 429, {"accepted": False, "error": "agent action rate limit exceeded"}
+        if not isinstance(body, dict):
+            return 400, {"accepted": False, "error": "JSON object required"}
+        confidence = body.get("confidence", 1.0)
+        try:
+            confidence = float(confidence)
+        except (TypeError, ValueError):
+            return 400, {"accepted": False, "error": "confidence must be a number"}
+        if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
+            return 400, {"accepted": False, "error": "confidence must be in [0, 1]"}
+        if confidence < 0.5:
+            return 409, {"accepted": False, "error": "confidence is below 0.5"}
+        arm = body.get("arm")
+        if arm not in self.SIDES:
+            return 400, {"accepted": False, "error": "arm must be left or right"}
+        gripper = body.get("gripper", "hold")
+        if gripper not in ("hold", "open", "close"):
+            return 400, {"accepted": False, "error": "gripper must be hold, open, or close"}
+        values = {key: body.get(key, 0.0) for key in ("tilt_x", "tilt_y", "insertion", "roll")}
+        try:
+            values = {key: float(value) for key, value in values.items()}
+        except (TypeError, ValueError):
+            return 400, {"accepted": False, "error": "action values must be numbers"}
+        if not all(math.isfinite(value) and -1.0 <= value <= 1.0 for value in values.values()):
+            return 400, {"accepted": False, "error": "action values must be finite and in [-1, 1]"}
+        has_motion = max(abs(value) for value in values.values()) >= 0.05
+        if has_motion and gripper != "hold":
+            return 409, {"accepted": False, "error": "send motion and gripper actions separately"}
+        if not has_motion and gripper == "hold":
+            return 400, {"accepted": False, "error": "action is empty"}
+
+        status, result = 202, {"accepted": True, "arm": arm}
+        if has_motion:
+            status, result = self.jog({"arm": arm, **values})
+        if status < 300 and gripper != "hold":
+            grip_status, grip_result = self.control_gripper(arm, gripper)
+            if grip_status >= 300:
+                return grip_status, {"accepted": False, "motion": result, "gripper": grip_result}
+            result["gripper"] = grip_result
+        if status < 300:
+            self._agent_last_action = now
+            result.update({"confidence": confidence, "accepted": True})
+        return status, result
 
     def _clear_active(self):
         self._active_arm = None
@@ -462,8 +562,17 @@ class DualRcmWebTeleop(Node):
                 for side in self.SIDES
             ):
                 return False, "等待左右臂最新位姿后再开始记录"
+            if any(
+                self._joints[side] is None or now - self._joint_received[side] > 1.0
+                for side in self.SIDES
+            ):
+                return False, "等待左右臂最新关节状态后再开始记录"
             start_poses = {
                 side: self._pose_to_document(self._poses[side])
+                for side in self.SIDES
+            }
+            start_joints = {
+                side: self._joint_to_document(self._joints[side])
                 for side in self.SIDES
             }
             with self._teach_lock:
@@ -471,6 +580,7 @@ class DualRcmWebTeleop(Node):
                 self._teach_started = time.monotonic()
                 self._teach_actions = []
                 self._teach_start_poses = start_poses
+                self._teach_start_joints = start_joints
         return True, "recording started"
 
     @staticmethod
@@ -481,6 +591,13 @@ class DualRcmWebTeleop(Node):
             "frame_id": pose.header.frame_id,
             "position": {"x": p.x, "y": p.y, "z": p.z},
             "orientation": {"x": q.x, "y": q.y, "z": q.z, "w": q.w},
+        }
+
+    @staticmethod
+    def _joint_to_document(joints):
+        return {
+            "names": list(joints.name),
+            "positions": [float(value) for value in joints.position],
         }
 
     def teaching_stop(self):
@@ -495,12 +612,13 @@ class DualRcmWebTeleop(Node):
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         path = os.path.join(self._teach_directory, f"dual_rcm_{stamp}.json")
         document = {
-            "format": "rm_rcm_teaching_v1",
+            "format": "rm_rcm_teaching_v2",
             "created_utc": datetime.now(timezone.utc).isoformat(),
             "step_angle_deg": math.degrees(self._step_angle),
             "step_roll_deg": math.degrees(self._step_roll),
             "step_insertion_m": self._step_insertion,
             "start_poses": self._teach_start_poses,
+            "start_joints": self._teach_start_joints,
             "actions": actions,
             "duration_sec": actions[-1]["time_sec"] if actions else 0.0,
         }
@@ -714,6 +832,8 @@ def make_handler(node, page):
                 self._send(200, page, "text/html; charset=utf-8")
             elif self.path == "/api/state":
                 self._send(200, node.state())
+            elif self.path == "/api/agent/observe":
+                self._send(200, node.agent_observation())
             elif self.path == "/camera.mjpg":
                 self._stream_camera()
             else:
@@ -747,6 +867,7 @@ def make_handler(node, page):
                 "/api/jog", "/api/stop", "/api/teaching/start", "/api/teaching/stop",
                 "/api/motion-mode",
                 "/api/gripper/open", "/api/gripper/close",
+                "/api/agent/action",
             ):
                 self._send(404, {"error": "not found"})
                 return
@@ -766,6 +887,10 @@ def make_handler(node, page):
             except ValueError as error:
                 code = 413 if str(error) == "request too large" else 400
                 self._send(code, {"error": str(error)})
+                return
+            if self.path == "/api/agent/action":
+                status, result = node.agent_action(body)
+                self._send(status, result)
                 return
             if self.path == "/api/motion-mode":
                 accepted, message = node.set_motion_mode(body.get("mode"))

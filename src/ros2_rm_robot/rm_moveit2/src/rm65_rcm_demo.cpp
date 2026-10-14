@@ -27,6 +27,7 @@
 #include <geometry_msgs/msg/point_stamped.hpp>
 #include <geometry_msgs/msg/pose.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
+#include <sensor_msgs/msg/joint_state.hpp>
 #include <visualization_msgs/msg/interactive_marker.hpp>
 #include <visualization_msgs/msg/interactive_marker_control.hpp>
 #include <visualization_msgs/msg/interactive_marker_feedback.hpp>
@@ -78,6 +79,18 @@ public:
       [this](geometry_msgs::msg::PoseStamped::ConstSharedPtr target) {
         onWebTarget(target);
       });
+    playback_start_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
+      "rcm_demo/playback_start_target", rclcpp::QoS(10),
+      [this](geometry_msgs::msg::PoseStamped::ConstSharedPtr target) {
+        onPlaybackStartTarget(target);
+      });
+    playback_start_joints_sub_ = create_subscription<sensor_msgs::msg::JointState>(
+      "rcm_demo/playback_start_joints", rclcpp::QoS(10),
+      [this](sensor_msgs::msg::JointState::ConstSharedPtr target) {
+        onPlaybackStartJoints(target);
+      });
+    playback_start_result_pub_ = create_publisher<std_msgs::msg::UInt64>(
+      "rcm_demo/playback_start_result", rclcpp::QoS(10).transient_local());
     set_rcm_point_callback_group_ = create_callback_group(
       rclcpp::CallbackGroupType::MutuallyExclusive);
     auto set_rcm_point_options = rclcpp::SubscriptionOptions();
@@ -204,14 +217,17 @@ public:
     const double tip_radius = (start_tip - rcm_point).norm();
     const double initial_error = rcmError(start_tip, shaft_axis, rcm_point);
     const double tolerance = get_parameter("rcm_tolerance_m").as_double();
-    if (tip_radius > 1.0 || !std::isfinite(tolerance) ||
-      tolerance <= 0.0 || initial_error > tolerance)
-    {
+    if (tip_radius > 1.0 || !std::isfinite(tolerance) || tolerance <= 0.0) {
       RCLCPP_ERROR(get_logger(),
-        "初始状态不满足 RCM：尖端到 RCM 距离=%.4f m，轴线误差=%.4f m，容差=%.4f m。"
-        "请确认固定点位于当前器具轴线上。",
-        tip_radius, initial_error, tolerance);
+        "RCM 参数无效：尖端到 RCM 距离=%.4f m，容差=%.4f m。",
+        tip_radius, tolerance);
       return false;
+    }
+    if (initial_error > tolerance) {
+      RCLCPP_WARN(get_logger(),
+        "当前姿态暂不满足 RCM：尖端到 RCM 距离=%.4f m，轴线误差=%.4f m，容差=%.4f m。"
+        "继续启动，示教回放可先用普通位姿规划移动到记录起始位姿。",
+        tip_radius, initial_error, tolerance);
     }
     {
       std::lock_guard<std::mutex> lock(rcm_mutex_);
@@ -623,6 +639,135 @@ private:
     feedback->header = target->header;
     feedback->pose = target->pose;
     onInteractiveFeedback(feedback);
+  }
+
+  void onPlaybackStartTarget(
+    const geometry_msgs::msg::PoseStamped::ConstSharedPtr & target)
+  {
+    if (!move_group_ || motion_active_.exchange(true)) {
+      RCLCPP_DEBUG(get_logger(), "忽略重复的示教起始位姿请求：当前已有运动");
+      return;
+    }
+    if (motion_thread_.joinable()) {
+      motion_thread_.join();
+    }
+    publishMotionBusy(true);
+    const auto requested = *target;
+    motion_thread_ = std::thread([this, requested]() {
+      bool success = false;
+      move_group_->clearPoseTargets();
+      move_group_->setPoseTarget(requested, end_effector_link_);
+      moveit::planning_interface::MoveGroupInterface::Plan plan;
+      auto plan_result = move_group_->plan(plan);
+      if (plan_result != moveit::core::MoveItErrorCode::SUCCESS) {
+        RCLCPP_WARN(get_logger(),
+          "示教起始位姿精确 IK 规划失败（错误码=%d），尝试近似 IK",
+          plan_result.val);
+        move_group_->clearPoseTargets();
+        if (move_group_->setApproximateJointValueTarget(requested, end_effector_link_)) {
+          plan_result = move_group_->plan(plan);
+        }
+      }
+      if (plan_result == moveit::core::MoveItErrorCode::SUCCESS) {
+        const auto execute_result = move_group_->execute(plan);
+        success = execute_result == moveit::core::MoveItErrorCode::SUCCESS;
+        if (!success) {
+          RCLCPP_WARN(get_logger(), "示教起始位姿轨迹执行失败（错误码=%d）", execute_result.val);
+        }
+      } else {
+        RCLCPP_WARN(get_logger(), "示教起始位姿近似 IK 规划失败（错误码=%d）", plan_result.val);
+      }
+      move_group_->clearPoseTargets();
+      publishMotionBusy(false);
+      motion_active_.store(false);
+      publishPlaybackStartResult(requested, success);
+      RCLCPP_INFO(get_logger(), "示教起始位姿恢复%s（此步骤不检查当前 RCM 偏差）",
+        success ? "完成" : "失败");
+    });
+  }
+
+  void onPlaybackStartJoints(
+    const sensor_msgs::msg::JointState::ConstSharedPtr & target)
+  {
+    if (!move_group_ || motion_active_.exchange(true)) {
+      RCLCPP_DEBUG(get_logger(), "忽略重复的关节起始位姿请求：当前已有运动");
+      return;
+    }
+    if (motion_thread_.joinable()) {
+      motion_thread_.join();
+    }
+    publishMotionBusy(true);
+    const auto requested = *target;
+    motion_thread_ = std::thread([this, requested]() {
+      bool success = false;
+      move_group_->clearPoseTargets();
+      std::map<std::string, double> joint_target;
+      const auto active_joints = move_group_->getActiveJoints();
+      for (std::size_t i = 0; i < requested.name.size() && i < requested.position.size(); ++i) {
+        std::string joint_name = requested.name[i];
+        if (std::find(active_joints.begin(), active_joints.end(), joint_name) == active_joints.end()) {
+          const std::string namespace_name = get_namespace();
+          const auto slash = namespace_name.find_last_of('/');
+          if (slash != std::string::npos && slash + 1 < namespace_name.size()) {
+            std::string arm_prefix = namespace_name.substr(slash + 1);
+            const auto arm_suffix = arm_prefix.find("_arm");
+            if (arm_suffix != std::string::npos) {
+              arm_prefix.erase(arm_suffix);
+            }
+            arm_prefix += "_";
+            if (joint_name.rfind(arm_prefix, 0) == 0) {
+              const std::string stripped = joint_name.substr(arm_prefix.size());
+              if (std::find(active_joints.begin(), active_joints.end(), stripped) != active_joints.end()) {
+                joint_name = stripped;
+              }
+            }
+          }
+        }
+        joint_target[joint_name] = requested.position[i];
+      }
+      if (joint_target.size() == active_joints.size() &&
+        std::all_of(active_joints.begin(), active_joints.end(),
+          [&joint_target](const auto & name) {return joint_target.count(name) != 0;})) {
+        move_group_->setJointValueTarget(joint_target);
+        moveit::planning_interface::MoveGroupInterface::Plan plan;
+        const auto plan_result = move_group_->plan(plan);
+        if (plan_result == moveit::core::MoveItErrorCode::SUCCESS) {
+          const auto execute_result = move_group_->execute(plan);
+          success = execute_result == moveit::core::MoveItErrorCode::SUCCESS;
+          if (!success) {
+            RCLCPP_WARN(get_logger(), "示教关节起始位姿执行失败（错误码=%d）", execute_result.val);
+          }
+        } else {
+          RCLCPP_WARN(get_logger(), "示教关节起始位姿规划失败（错误码=%d）", plan_result.val);
+        }
+      } else {
+        RCLCPP_WARN(get_logger(), "示教关节起始位姿关节数量不匹配：收到 %zu，期望 %zu",
+          joint_target.size(), active_joints.size());
+      }
+      publishMotionBusy(false);
+      motion_active_.store(false);
+      publishPlaybackStartResult(requested.header.stamp, success);
+      RCLCPP_INFO(get_logger(), "示教关节起始位姿恢复%s",
+        success ? "完成" : "失败");
+    });
+  }
+
+  void publishPlaybackStartResult(
+    const geometry_msgs::msg::PoseStamped & pose, bool success)
+  {
+    publishPlaybackStartResult(pose.header.stamp, success);
+  }
+
+  void publishPlaybackStartResult(
+    const builtin_interfaces::msg::Time & stamp, bool success)
+  {
+    std_msgs::msg::UInt64 result;
+    result.data = (static_cast<uint64_t>(stamp.sec) << 32) |
+      static_cast<uint32_t>(stamp.nanosec);
+    if (!success) {
+      result.data |= (uint64_t{1} << 63);
+    }
+    playback_start_result_pub_->publish(result);
   }
 
   bool moveToRcmTarget(
@@ -1108,11 +1253,14 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr rcm_point_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr motion_busy_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr set_rcm_result_pub_;
+  rclcpp::Publisher<std_msgs::msg::UInt64>::SharedPtr playback_start_result_pub_;
   rclcpp::Publisher<std_msgs::msg::UInt64>::SharedPtr collision_scene_synced_pub_;
   rclcpp::CallbackGroup::SharedPtr set_rcm_point_callback_group_;
   rclcpp::CallbackGroup::SharedPtr perception_scene_callback_group_;
   rclcpp::TimerBase::SharedPtr marker_timer_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr web_target_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr playback_start_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr playback_start_joints_sub_;
   rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr set_rcm_point_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr stop_sub_;
   rclcpp::Subscription<rm_ros_interfaces::msg::PerceptionScene>::SharedPtr perception_scene_sub_;

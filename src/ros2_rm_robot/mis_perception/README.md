@@ -91,6 +91,13 @@ current segmenter is a color-rule phantom baseline, so its class masks must be
 validated against the actual competition phantom and lighting. In particular,
 some supplied material profiles may not reliably distinguish the kidney.
 
+The overlay draws a white/red lesion contour, an equivalent-area circle, a
+center cross, and the center pixel `(u, v)`. When valid depth is available, the
+center is the projection of the median 3D lesion point and the label also shows
+its camera-frame XYZ in millimeters. Without valid 3D depth, it falls back to
+the 2D mask centroid and omits XYZ. The circle radius is derived from mask area;
+it is a visual size cue, not a fitted anatomical boundary.
+
 ## Obstacle geometry
 
 For every detected non-liver, non-lesion class, the node computes a world-frame

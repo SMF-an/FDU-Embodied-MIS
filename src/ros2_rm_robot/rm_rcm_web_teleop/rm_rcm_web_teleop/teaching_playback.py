@@ -10,9 +10,10 @@ import yaml
 from ament_index_python.packages import get_package_share_directory
 import rclpy
 from geometry_msgs.msg import PoseStamped
+from sensor_msgs.msg import JointState
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, UInt64
 
 from .dual_server import ServoController
 
@@ -25,12 +26,20 @@ class RcmTeachingPlayback(Node):
         self.declare_parameter("file", "")
         self.declare_parameter("speed", 1.0)
         self.declare_parameter("busy_timeout_sec", 30.0)
+        self.declare_parameter("start_pose_timeout_sec", 120.0)
+        self.declare_parameter("motion_start_timeout_sec", 2.0)
         self.declare_parameter("pause_limit_sec", 10.0)
         self._pubs = {
             side: self.create_publisher(
                 PoseStamped, f"/{side}_arm/rcm_demo/web_target", 10
             ) for side in self.SIDES
         }
+        self._start_pubs = {
+            side: self.create_publisher(
+                JointState, f"/{side}_arm/rcm_demo/playback_start_joints", 10
+            ) for side in self.SIDES
+        }
+        self._start_results = {side: None for side in self.SIDES}
         qos = QoSProfile(
             depth=1,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
@@ -53,6 +62,12 @@ class RcmTeachingPlayback(Node):
                 lambda message, arm=side: self._busy.__setitem__(arm, message.data),
                 qos,
             )
+            self.create_subscription(
+                UInt64,
+                f"/{side}_arm/rcm_demo/playback_start_result",
+                lambda message, arm=side: self._start_results.__setitem__(arm, message.data),
+                qos,
+            )
 
     def load_actions(self):
         path = self.get_parameter("file").value
@@ -61,7 +76,7 @@ class RcmTeachingPlayback(Node):
         path = os.path.abspath(os.path.expanduser(path))
         with open(path, "r", encoding="utf-8") as stream:
             document = json.load(stream)
-        if document.get("format") != "rm_rcm_teaching_v1":
+        if document.get("format") != "rm_rcm_teaching_v2":
             raise ValueError("unsupported teaching file format")
         actions = document.get("actions")
         if not isinstance(actions, list) or not actions:
@@ -77,6 +92,17 @@ class RcmTeachingPlayback(Node):
                 if not isinstance(action.get(key), dict):
                     raise ValueError(f"teaching action missing {key}")
         self._start_poses = document.get("start_poses")
+        self._start_joints = document.get("start_joints")
+        if not isinstance(self._start_joints, dict):
+            raise ValueError("teaching file missing start_joints; record a new v2 teaching")
+        for side in self.SIDES:
+            joints = self._start_joints.get(side)
+            if (not isinstance(joints, dict) or
+                    not isinstance(joints.get("names"), list) or
+                    not isinstance(joints.get("positions"), list) or
+                    len(joints["names"]) != len(joints["positions"]) or
+                    len(joints["positions"]) == 0):
+                raise ValueError(f"teaching {side} start joints are invalid")
         if self._start_poses is not None:
             if not isinstance(self._start_poses, dict):
                 raise ValueError("teaching start_poses must be an object")
@@ -91,6 +117,9 @@ class RcmTeachingPlayback(Node):
 
     def wait_for_motion(self, side):
         timeout = float(self.get_parameter("busy_timeout_sec").value)
+        start_deadline = time.monotonic() + float(
+            self.get_parameter("motion_start_timeout_sec").value
+        )
         deadline = time.monotonic() + timeout
         saw_busy = False
         while rclpy.ok() and time.monotonic() < deadline:
@@ -99,7 +128,29 @@ class RcmTeachingPlayback(Node):
                 saw_busy = True
             if saw_busy and not self._busy[side]:
                 return
+            if not saw_busy and time.monotonic() >= start_deadline:
+                # A target can be rejected immediately (for example while the
+                # tip is still at the RCM point), before the transient busy
+                # notification reaches this node.
+                return
         raise TimeoutError(f"{side} arm did not finish within {timeout:.1f} seconds")
+
+    def wait_for_start_result(self, side, request_id, target):
+        timeout = float(self.get_parameter("start_pose_timeout_sec").value)
+        deadline = time.monotonic() + timeout
+        next_publish = 0.0
+        while rclpy.ok() and time.monotonic() < deadline:
+            now = time.monotonic()
+            if now >= next_publish:
+                self._start_pubs[side].publish(target)
+                next_publish = now + 0.25
+            rclpy.spin_once(self, timeout_sec=0.05)
+            result = self._start_results[side]
+            if result == request_id:
+                return
+            if result == (request_id | (1 << 63)):
+                raise RuntimeError(f"{side} 臂起始位姿普通 MoveIt 恢复失败")
+        raise TimeoutError(f"{side} 臂起始位姿恢复结果等待超时")
 
     def make_target(self, action):
         target = PoseStamped()
@@ -129,10 +180,16 @@ class RcmTeachingPlayback(Node):
             for side in self.SIDES:
                 while self._busy[side]:
                     rclpy.spin_once(self, timeout_sec=0.05)
-                start_action = {"arm": side, **self._start_poses[side]}
-                self._pubs[side].publish(self.make_target(start_action))
+                joints = self._start_joints[side]
+                start_target = JointState()
+                start_target.header.stamp = self.get_clock().now().to_msg()
+                start_target.name = [str(name) for name in joints["names"]]
+                start_target.position = [float(value) for value in joints["positions"]]
+                request_id = (int(start_target.header.stamp.sec) << 32) | int(start_target.header.stamp.nanosec)
+                self._start_results[side] = None
+                self._start_pubs[side].publish(start_target)
                 self.get_logger().info(f"移动到 {side} 臂起始位姿")
-                self.wait_for_motion(side)
+                self.wait_for_start_result(side, request_id, start_target)
             replay_started = time.monotonic()
         for index, action in enumerate(actions, 1):
             recorded_time = float(action.get("time_sec", previous_time))

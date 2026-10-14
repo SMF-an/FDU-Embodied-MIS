@@ -1,19 +1,19 @@
 servos:
   left:
-    port: "/dev/ttyACM0"
+    port: "/dev/ttyACM1"
     servo_id: 1
     baud_rate: 1000000
-    open_position: 147
-    close_position: 215
+    open_position: 762
+    close_position: 806
     min_position: 20
     max_position: 1003
     speed: 50
   right:
-    port: "/dev/ttyACM1"
+    port: "/dev/ttyACM0"
     servo_id: 1
     baud_rate: 1000000
-    open_position: 147
-    close_position: 215
+    open_position: 380
+    close_position: 260
     min_position: 20
     max_position: 1003
     speed: 50
